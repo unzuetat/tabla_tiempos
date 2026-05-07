@@ -1,0 +1,612 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Tabla de tiempos</title>
+<style>
+  :root {
+    --bg: #fafaf7;
+    --fg: #1a1a1a;
+    --muted: #6b6b6b;
+    --border: #d8d8d4;
+    --row-hover: #f0efe9;
+    --accent: #2b6cb0;
+    --accent-bg: #e8f0f9;
+    --warn: #b94a48;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font: 14px/1.4 -apple-system, "Segoe UI", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    margin: 0;
+    padding: 24px;
+  }
+  h1 {
+    font-size: 18px;
+    font-weight: 600;
+    margin: 0 0 4px 0;
+  }
+  .hint {
+    color: var(--muted);
+    font-size: 12px;
+    margin-bottom: 16px;
+  }
+  .toolbar {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+  }
+  button, label.btn {
+    font: inherit;
+    padding: 6px 12px;
+    border: 1px solid var(--border);
+    background: white;
+    border-radius: 4px;
+    cursor: pointer;
+    display: inline-block;
+  }
+  button:hover, label.btn:hover { background: var(--row-hover); }
+  button.danger { color: var(--warn); }
+  #importFile { display: none; }
+
+  table {
+    border-collapse: collapse;
+    table-layout: fixed;
+    width: 100%;
+    background: white;
+    border: 1px solid var(--border);
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: 8px 10px;
+    vertical-align: top;
+    text-align: left;
+    overflow-wrap: break-word;
+    word-wrap: break-word;
+    white-space: pre-wrap;
+  }
+  thead th {
+    background: #efefe8;
+    font-weight: 600;
+    user-select: none;
+    position: relative;
+  }
+  th.data-col { padding-right: 14px; }
+  .col-name {
+    display: block;
+    outline: none;
+  }
+  .col-name:focus {
+    background: var(--accent-bg);
+    box-shadow: inset 0 0 0 2px var(--accent);
+  }
+
+  .resize-handle {
+    position: absolute;
+    top: 0;
+    right: -3px;
+    width: 8px;
+    height: 100%;
+    cursor: col-resize;
+    user-select: none;
+    z-index: 2;
+  }
+  .resize-handle::after {
+    content: "";
+    position: absolute;
+    top: 25%;
+    bottom: 25%;
+    left: 3px;
+    width: 2px;
+    background: transparent;
+  }
+  .resize-handle:hover::after,
+  body.resizing .resize-handle::after {
+    background: var(--accent);
+  }
+  body.resizing { cursor: col-resize; user-select: none; }
+
+  tbody tr.dragging { opacity: 0.4; }
+  tbody tr.drop-above td { box-shadow: inset 0 2px 0 0 var(--accent); }
+  tbody tr.drop-below td { box-shadow: inset 0 -2px 0 0 var(--accent); }
+  tbody tr:hover { background: var(--row-hover); }
+  td[contenteditable="true"]:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+    background: var(--accent-bg);
+  }
+
+  th.handle, td.handle { width: 28px; text-align: center; color: var(--muted); user-select: none; }
+  td.handle { cursor: grab; }
+  td.handle:active { cursor: grabbing; }
+
+  th.num, td.num { width: 36px; text-align: right; color: var(--muted); }
+
+  td.time, th[data-time-col="true"], tfoot td.time {
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+  }
+  td.time.invalid { color: var(--warn); }
+
+  th.actions, td.actions { width: 36px; text-align: center; }
+  td.actions button {
+    padding: 2px 6px;
+    font-size: 12px;
+    color: var(--muted);
+    border: none;
+    background: transparent;
+  }
+  td.actions button:hover { color: var(--warn); background: transparent; }
+
+  tfoot td {
+    background: #efefe8;
+    font-weight: 600;
+  }
+  tfoot td.time { font-size: 15px; }
+
+  .saved-status {
+    margin-left: auto;
+    font-size: 12px;
+    color: var(--muted);
+    align-self: center;
+  }
+</style>
+</head>
+<body>
+
+<h1>Tabla de tiempos</h1>
+<div class="hint">
+  Celdas y encabezados editables. Tiempo en <b>mm:ss</b> o <b>hh:mm:ss</b>.
+  Arrastra <b>⋮⋮</b> para reordenar filas. Arrastra el borde derecho del encabezado para redimensionar columnas. Cambios autoguardados en este navegador.
+</div>
+
+<div class="toolbar">
+  <button id="addRow">+ Fila</button>
+  <button id="addCol">+ Columna</button>
+  <button id="exportCsv">Exportar CSV</button>
+  <button id="exportJson">Exportar JSON</button>
+  <label class="btn" for="importFile">Importar JSON</label>
+  <input type="file" id="importFile" accept="application/json,.json">
+  <button id="reset" class="danger">Reset</button>
+  <span class="saved-status" id="status"></span>
+</div>
+
+<table id="grid">
+  <thead><tr id="headRow"></tr></thead>
+  <tbody id="rows"></tbody>
+  <tfoot>
+    <tr id="footRow"></tr>
+  </tfoot>
+</table>
+
+<script>
+  const STORAGE_KEY = 'tabla-tiempos-v1';
+
+  const defaultState = () => ({
+    columns: [
+      { name: 'Tarea',  width: 260, time: false },
+      { name: 'Notas',  width: 360, time: false },
+      { name: 'Tiempo', width: 110, time: true  },
+    ],
+    rows: Array.from({ length: 8 }, () => ({ cells: ['', '', ''] })),
+  });
+
+  // ---------------- State ----------------
+  let state = loadState() || defaultState();
+  let saveTimer = null;
+
+  function loadState() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return null;
+      const obj = JSON.parse(raw);
+      if (!obj || !Array.isArray(obj.columns) || !Array.isArray(obj.rows)) return null;
+      return normalize(obj);
+    } catch { return null; }
+  }
+
+  function normalize(obj) {
+    const columns = obj.columns.map(c => ({
+      name: typeof c.name === 'string' ? c.name : '',
+      width: Number.isFinite(c.width) ? c.width : null,
+      time: !!c.time,
+    }));
+    const colCount = columns.length;
+    const rows = obj.rows.map(r => {
+      const cells = Array.isArray(r.cells) ? r.cells.slice(0, colCount) : [];
+      while (cells.length < colCount) cells.push('');
+      return { cells: cells.map(v => v == null ? '' : String(v)) };
+    });
+    return { columns, rows };
+  }
+
+  function scheduleSave() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveNow, 200);
+  }
+
+  function saveNow() {
+    state = readStateFromDom();
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      flashStatus('guardado');
+    } catch (e) {
+      flashStatus('error guardando', true);
+    }
+  }
+
+  function flashStatus(msg, isError) {
+    const el = document.getElementById('status');
+    el.textContent = msg;
+    el.style.color = isError ? 'var(--warn)' : 'var(--muted)';
+    clearTimeout(flashStatus._t);
+    flashStatus._t = setTimeout(() => { el.textContent = ''; }, 1200);
+  }
+
+  function readStateFromDom() {
+    const dataThs = [...document.querySelectorAll('thead th.data-col')];
+    const columns = dataThs.map(th => ({
+      name: th.querySelector('.col-name').textContent,
+      width: th.style.width ? parseInt(th.style.width, 10) : null,
+      time: th.dataset.timeCol === 'true',
+    }));
+    const rows = [...tbody.querySelectorAll('tr')].map(tr => ({
+      cells: [...tr.querySelectorAll('td.data-cell')].map(td => td.textContent),
+    }));
+    return { columns, rows };
+  }
+
+  // ---------------- Render ----------------
+  const headRow = document.getElementById('headRow');
+  const tbody = document.getElementById('rows');
+  const footRow = document.getElementById('footRow');
+
+  function render() {
+    // Header
+    headRow.innerHTML = '';
+    headRow.appendChild(th('handle', ''));
+    headRow.appendChild(th('num', '#'));
+    state.columns.forEach((col, i) => headRow.appendChild(headerCell(col, i)));
+    headRow.appendChild(th('actions', ''));
+
+    // Body
+    tbody.innerHTML = '';
+    state.rows.forEach(r => tbody.appendChild(buildRow(r)));
+
+    // Footer
+    renderFooter();
+
+    renumber();
+    recalcTotal();
+  }
+
+  function th(cls, text) {
+    const el = document.createElement('th');
+    el.className = cls;
+    el.textContent = text;
+    return el;
+  }
+
+  function headerCell(col, idx) {
+    const el = document.createElement('th');
+    el.className = 'data-col';
+    if (col.time) el.dataset.timeCol = 'true';
+    if (col.width) el.style.width = col.width + 'px';
+
+    const name = document.createElement('span');
+    name.className = 'col-name';
+    name.contentEditable = 'true';
+    name.textContent = col.name;
+    name.addEventListener('input', scheduleSave);
+    el.appendChild(name);
+
+    const handle = document.createElement('div');
+    handle.className = 'resize-handle';
+    handle.title = 'Arrastra para redimensionar';
+    handle.addEventListener('mousedown', e => startResize(e, el));
+    el.appendChild(handle);
+
+    return el;
+  }
+
+  function buildRow(rowState) {
+    const tr = document.createElement('tr');
+    tr.draggable = false;
+
+    const handleTd = document.createElement('td');
+    handleTd.className = 'handle';
+    handleTd.title = 'Arrastra para reordenar';
+    handleTd.textContent = '⋮⋮';
+    tr.appendChild(handleTd);
+
+    const numTd = document.createElement('td');
+    numTd.className = 'num';
+    tr.appendChild(numTd);
+
+    state.columns.forEach((col, i) => {
+      const td = document.createElement('td');
+      td.className = 'data-cell' + (col.time ? ' time' : '');
+      if (col.time) td.dataset.time = 'true';
+      td.contentEditable = 'true';
+      td.textContent = (rowState.cells[i] != null) ? rowState.cells[i] : '';
+      tr.appendChild(td);
+    });
+
+    const actionsTd = document.createElement('td');
+    actionsTd.className = 'actions';
+    const del = document.createElement('button');
+    del.className = 'del';
+    del.title = 'Eliminar fila';
+    del.textContent = '✕';
+    actionsTd.appendChild(del);
+    tr.appendChild(actionsTd);
+
+    wireRow(tr);
+    return tr;
+  }
+
+  function renderFooter() {
+    footRow.innerHTML = '';
+    footRow.appendChild(td('', ''));               // handle col
+    footRow.appendChild(td('', ''));               // num col
+    // For each data col: only the time col shows the total; others are blank.
+    // Non-time cols before the first time col become a "Total" label spanning them.
+    const timeIdx = state.columns.findIndex(c => c.time);
+    if (timeIdx === -1) {
+      state.columns.forEach(() => footRow.appendChild(td('', '')));
+    } else {
+      if (timeIdx > 0) {
+        const label = td('', 'Total');
+        label.colSpan = timeIdx;
+        label.style.textAlign = 'right';
+        footRow.appendChild(label);
+      } else {
+        // time col is first; put label in num col instead
+        footRow.lastChild.textContent = 'Total';
+        footRow.lastChild.style.textAlign = 'right';
+      }
+      const totalCell = td('time', '00:00');
+      totalCell.id = 'total';
+      footRow.appendChild(totalCell);
+      // remaining cols after time
+      for (let i = timeIdx + 1; i < state.columns.length; i++) {
+        footRow.appendChild(td('', ''));
+      }
+    }
+    footRow.appendChild(td('', '')); // actions col
+  }
+
+  function td(cls, text) {
+    const el = document.createElement('td');
+    if (cls) el.className = cls;
+    el.textContent = text;
+    return el;
+  }
+
+  // ---------------- Row wiring ----------------
+  function wireRow(tr) {
+    const handle = tr.querySelector('td.handle');
+    const del = tr.querySelector('button.del');
+
+    handle.addEventListener('mousedown', () => { tr.draggable = true; });
+    handle.addEventListener('mouseup',   () => { tr.draggable = false; });
+
+    tr.addEventListener('dragstart', e => {
+      tr.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', 'row');
+    });
+    tr.addEventListener('dragend', () => {
+      tr.classList.remove('dragging');
+      tr.draggable = false;
+      tbody.querySelectorAll('tr').forEach(r => r.classList.remove('drop-above', 'drop-below'));
+      renumber();
+      scheduleSave();
+    });
+
+    del.addEventListener('click', () => {
+      tr.remove();
+      renumber();
+      recalcTotal();
+      scheduleSave();
+    });
+
+    tr.querySelectorAll('td.data-cell').forEach(td => {
+      td.addEventListener('input', () => {
+        if (td.dataset.time === 'true') recalcTotal();
+        scheduleSave();
+      });
+      if (td.dataset.time === 'true') {
+        td.addEventListener('blur', () => {
+          const sec = parseTime(td.textContent);
+          if (sec === null && td.textContent.trim() !== '') {
+            td.classList.add('invalid');
+          } else {
+            td.classList.remove('invalid');
+            if (sec !== null) td.textContent = formatTime(sec);
+          }
+          recalcTotal();
+          scheduleSave();
+        });
+      }
+    });
+  }
+
+  // ---------------- Drag & drop rows ----------------
+  tbody.addEventListener('dragover', e => {
+    e.preventDefault();
+    const dragging = tbody.querySelector('tr.dragging');
+    if (!dragging) return;
+    const target = e.target.closest('tr');
+    if (!target || target === dragging) return;
+    const rect = target.getBoundingClientRect();
+    const before = (e.clientY - rect.top) < rect.height / 2;
+    tbody.querySelectorAll('tr').forEach(r => r.classList.remove('drop-above', 'drop-below'));
+    target.classList.add(before ? 'drop-above' : 'drop-below');
+  });
+
+  tbody.addEventListener('drop', e => {
+    e.preventDefault();
+    const dragging = tbody.querySelector('tr.dragging');
+    if (!dragging) return;
+    const target = e.target.closest('tr');
+    if (!target || target === dragging) return;
+    const rect = target.getBoundingClientRect();
+    const before = (e.clientY - rect.top) < rect.height / 2;
+    if (before) tbody.insertBefore(dragging, target);
+    else tbody.insertBefore(dragging, target.nextSibling);
+  });
+
+  // ---------------- Column resize ----------------
+  let resizing = null;
+
+  function startResize(e, th) {
+    e.preventDefault();
+    resizing = {
+      th,
+      startX: e.clientX,
+      startWidth: th.getBoundingClientRect().width,
+    };
+    document.body.classList.add('resizing');
+  }
+
+  document.addEventListener('mousemove', e => {
+    if (!resizing) return;
+    const w = Math.max(40, resizing.startWidth + (e.clientX - resizing.startX));
+    resizing.th.style.width = w + 'px';
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (!resizing) return;
+    resizing = null;
+    document.body.classList.remove('resizing');
+    scheduleSave();
+  });
+
+  // ---------------- Helpers ----------------
+  function renumber() {
+    [...tbody.querySelectorAll('tr')].forEach((tr, i) => {
+      const cell = tr.querySelector('td.num');
+      if (cell) cell.textContent = i + 1;
+    });
+  }
+
+  function parseTime(str) {
+    if (!str) return 0;
+    const s = str.trim();
+    if (s === '') return 0;
+    const parts = s.split(':').map(p => p.trim());
+    if (parts.some(p => !/^\d+$/.test(p))) return null;
+    const nums = parts.map(Number);
+    if (nums.length === 1) return nums[0];
+    if (nums.length === 2) return nums[0] * 60 + nums[1];
+    if (nums.length === 3) return nums[0] * 3600 + nums[1] * 60 + nums[2];
+    return null;
+  }
+
+  function formatTime(totalSec) {
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    const s = totalSec % 60;
+    const pad = n => String(n).padStart(2, '0');
+    return h > 0 ? `${pad(h)}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
+  }
+
+  function recalcTotal() {
+    const totalEl = document.getElementById('total');
+    if (!totalEl) return;
+    let total = 0;
+    tbody.querySelectorAll('td[data-time="true"]').forEach(td => {
+      const v = parseTime(td.textContent);
+      if (v !== null) total += v;
+    });
+    totalEl.textContent = formatTime(total);
+  }
+
+  // ---------------- Toolbar ----------------
+  document.getElementById('addRow').addEventListener('click', () => {
+    const empty = { cells: state.columns.map(() => '') };
+    tbody.appendChild(buildRow(empty));
+    renumber();
+    scheduleSave();
+  });
+
+  document.getElementById('addCol').addEventListener('click', () => {
+    const name = prompt('Nombre de la nueva columna:', 'Columna');
+    if (name == null) return;
+    const isTime = confirm('¿Es una columna de tiempo (mm:ss / hh:mm:ss)?\n\nAceptar = sí, Cancelar = no');
+    state = readStateFromDom();
+    state.columns.push({ name: name || 'Columna', width: 160, time: isTime });
+    state.rows.forEach(r => r.cells.push(''));
+    render();
+    scheduleSave();
+  });
+
+  document.getElementById('exportCsv').addEventListener('click', () => {
+    const headers = state.columns.map(c => csvCell(c.name));
+    const lines = [headers.join(',')];
+    [...tbody.querySelectorAll('tr')].forEach(tr => {
+      const cells = [...tr.querySelectorAll('td.data-cell')].map(td => csvCell(td.textContent));
+      lines.push(cells.join(','));
+    });
+    download('tabla-tiempos.csv', lines.join('\n'), 'text/csv;charset=utf-8');
+  });
+
+  document.getElementById('exportJson').addEventListener('click', () => {
+    const data = readStateFromDom();
+    download('tabla-tiempos.json', JSON.stringify(data, null, 2), 'application/json');
+  });
+
+  document.getElementById('importFile').addEventListener('change', e => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const obj = JSON.parse(ev.target.result);
+        if (!obj || !Array.isArray(obj.columns) || !Array.isArray(obj.rows)) {
+          throw new Error('Formato inválido');
+        }
+        state = normalize(obj);
+        render();
+        saveNow();
+        flashStatus('importado');
+      } catch (err) {
+        alert('No se pudo importar: ' + err.message);
+      } finally {
+        e.target.value = '';
+      }
+    };
+    reader.readAsText(file);
+  });
+
+  document.getElementById('reset').addEventListener('click', () => {
+    if (!confirm('¿Borrar todos los datos y volver al estado por defecto?')) return;
+    localStorage.removeItem(STORAGE_KEY);
+    state = defaultState();
+    render();
+  });
+
+  function csvCell(s) {
+    s = (s || '').trim();
+    if (/[",\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+    return s;
+  }
+
+  function download(filename, content, mime) {
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // ---------------- Init ----------------
+  render();
+</script>
+</body>
+</html>
