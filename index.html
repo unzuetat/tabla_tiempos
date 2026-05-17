@@ -2,6 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Tabla de tiempos</title>
 <style>
   :root {
@@ -32,11 +33,41 @@
     font-size: 12px;
     margin-bottom: 16px;
   }
-  .toolbar {
+  .toolbar, .sheetbar {
     display: flex;
     gap: 8px;
     margin-bottom: 12px;
     flex-wrap: wrap;
+    align-items: center;
+  }
+  .sheetbar {
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .syncbar {
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .syncbar code {
+    font: 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: var(--accent-bg);
+    color: var(--accent);
+    padding: 3px 7px;
+    border-radius: 4px;
+    letter-spacing: 0.5px;
+  }
+  .syncbar .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    display: inline-block; vertical-align: middle;
+    background: var(--muted);
+  }
+  .syncbar .dot.ok    { background: #2f9e44; }
+  .syncbar .dot.busy  { background: #f08c00; }
+  .syncbar .dot.off   { background: var(--warn); }
+  .syncbar button { padding: 4px 9px; font-size: 12px; }
+  .sheetbar label.lbl {
+    color: var(--muted);
+    font-size: 12px;
   }
   button, label.btn {
     font: inherit;
@@ -50,6 +81,14 @@
   button:hover, label.btn:hover { background: var(--row-hover); }
   button.danger { color: var(--warn); }
   #importFile { display: none; }
+  select#sheetSelect {
+    font: inherit;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    background: white;
+    border-radius: 4px;
+    max-width: 240px;
+  }
 
   table {
     border-collapse: collapse;
@@ -73,11 +112,27 @@
     user-select: none;
     position: relative;
   }
-  th.data-col { padding-right: 14px; }
+  th.data-col { padding-right: 26px; }
   .col-name {
     display: block;
     outline: none;
   }
+  .col-del {
+    position: absolute;
+    top: 4px;
+    right: 10px;
+    padding: 0 4px;
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--muted);
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    opacity: 0;
+    z-index: 3;
+  }
+  thead th:hover .col-del { opacity: 1; }
+  .col-del:hover { color: var(--warn); background: transparent; }
   .col-name:focus {
     background: var(--accent-bg);
     box-shadow: inset 0 0 0 2px var(--accent);
@@ -112,6 +167,8 @@
   tbody tr.drop-above td { box-shadow: inset 0 2px 0 0 var(--accent); }
   tbody tr.drop-below td { box-shadow: inset 0 -2px 0 0 var(--accent); }
   tbody tr:hover { background: var(--row-hover); }
+  /* Color de fila: pinta las celdas; gana sobre el hover de fila. */
+  tbody td { background-color: var(--row-color, transparent); }
   td[contenteditable="true"]:focus {
     outline: 2px solid var(--accent);
     outline-offset: -2px;
@@ -130,15 +187,18 @@
   }
   td.time.invalid { color: var(--warn); }
 
-  th.actions, td.actions { width: 36px; text-align: center; }
+  th.actions, td.actions { width: 58px; text-align: center; white-space: nowrap; }
   td.actions button {
-    padding: 2px 6px;
-    font-size: 12px;
+    padding: 2px 5px;
+    font-size: 13px;
     color: var(--muted);
     border: none;
     background: transparent;
+    line-height: 1;
   }
-  td.actions button:hover { color: var(--warn); background: transparent; }
+  td.actions button.del:hover { color: var(--warn); background: transparent; }
+  td.actions button.color-btn:hover { color: var(--accent); background: transparent; }
+  td.actions button.color-btn.has-color { color: var(--fg); }
 
   tfoot td {
     background: #efefe8;
@@ -152,6 +212,43 @@
     color: var(--muted);
     align-self: center;
   }
+
+  /* Popover de paleta de colores */
+  #colorPop {
+    position: absolute;
+    display: none;
+    z-index: 50;
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+    gap: 6px;
+    grid-template-columns: repeat(4, 1fr);
+  }
+  #colorPop.open { display: grid; }
+  #colorPop .swatch {
+    width: 26px;
+    height: 26px;
+    border-radius: 4px;
+    border: 1px solid rgba(0,0,0,0.15);
+    cursor: pointer;
+    padding: 0;
+  }
+  #colorPop .swatch.none {
+    background: white;
+    position: relative;
+    color: var(--warn);
+    font-size: 14px;
+    line-height: 24px;
+    text-align: center;
+  }
+  #colorPop .swatch:hover { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  @media (max-width: 640px) {
+    body { padding: 14px; }
+    .saved-status { margin-left: 0; }
+  }
 </style>
 </head>
 <body>
@@ -159,7 +256,25 @@
 <h1>Tabla de tiempos</h1>
 <div class="hint">
   Celdas y encabezados editables. Tiempo en <b>mm:ss</b> o <b>hh:mm:ss</b>.
-  Arrastra <b>⋮⋮</b> para reordenar filas. Arrastra el borde derecho del encabezado para redimensionar columnas. Cambios autoguardados en este navegador.
+  Arrastra <b>⋮⋮</b> para reordenar filas. El bot&oacute;n <b>●</b> pinta la fila de color.
+  Cambia o crea sets en <b>Hoja</b>. Cambios autoguardados en este navegador.
+</div>
+
+<div class="syncbar toolbar" id="syncbar">
+  <span class="dot" id="syncDot" title="Estado de sincronización"></span>
+  <span id="syncMsg">Solo este dispositivo</span>
+  <span id="syncCodeWrap" style="display:none">· Código <code id="syncCode">—</code></span>
+  <button id="syncCodeBtn" style="display:none">Cambiar código</button>
+  <button id="syncCopyBtn" style="display:none">Copiar código</button>
+</div>
+
+<div class="sheetbar">
+  <label class="lbl" for="sheetSelect">Hoja:</label>
+  <select id="sheetSelect" title="Set activo"></select>
+  <button id="newSheet">+ Hoja</button>
+  <button id="renameSheet">Renombrar</button>
+  <button id="dupSheet">Duplicar</button>
+  <button id="delSheet" class="danger">Eliminar hoja</button>
 </div>
 
 <div class="toolbar">
@@ -169,7 +284,7 @@
   <button id="exportJson">Exportar JSON</button>
   <label class="btn" for="importFile">Importar JSON</label>
   <input type="file" id="importFile" accept="application/json,.json">
-  <button id="reset" class="danger">Reset</button>
+  <button id="reset" class="danger">Reset hoja</button>
   <span class="saved-status" id="status"></span>
 </div>
 
@@ -181,45 +296,131 @@
   </tfoot>
 </table>
 
-<script>
-  const STORAGE_KEY = 'tabla-tiempos-v1';
+<div id="colorPop"></div>
 
-  const defaultState = () => ({
+<script>
+  const STORAGE_KEY = 'tabla-tiempos-v2';
+  const LEGACY_KEY  = 'tabla-tiempos-v1';
+
+  // Paleta de etiquetas de color para filas (fondo suave, texto oscuro legible).
+  const PALETTE = [
+    { name: 'Sin color', value: '' },
+    { name: 'Rojo',      value: '#f8d2d0' },
+    { name: 'Naranja',   value: '#ffe2c2' },
+    { name: 'Amarillo',  value: '#fff2b8' },
+    { name: 'Verde',     value: '#cdeccf' },
+    { name: 'Azul',      value: '#cfe6f7' },
+    { name: 'Morado',    value: '#e2d6f5' },
+    { name: 'Gris',      value: '#e6e6e2' },
+  ];
+
+  const uid = () => 'h' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+  const defaultSheet = (name) => ({
+    id: uid(),
+    name: name || 'Set 1',
     columns: [
       { name: 'Tarea',  width: 260, time: false },
       { name: 'Notas',  width: 360, time: false },
       { name: 'Tiempo', width: 110, time: true  },
     ],
-    rows: Array.from({ length: 8 }, () => ({ cells: ['', '', ''] })),
+    rows: Array.from({ length: 8 }, () => ({ cells: ['', '', ''], color: '' })),
   });
 
+  const defaultDoc = () => {
+    const s = defaultSheet();
+    return { activeId: s.id, sheets: [s] };
+  };
+
+  // ---------------- Puente de sincronización (lo usa el módulo Firebase) ----------------
+  // El módulo de abajo (type="module") engancha aquí sin acoplar este script a Firebase.
+  const TT = window.TT = {
+    _saveHook: null,
+    _editing: false,
+    _pendingRemote: null,
+    // Devuelve el documento completo ya volcado desde el DOM.
+    getDoc() { syncActiveFromDom(); return doc; },
+    setSaveHook(fn) { this._saveHook = fn; },
+    // Aplica un documento que llega de la nube (sin re-subir).
+    applyRemote(remote) {
+      if (!remote || !Array.isArray(remote.sheets)) return;
+      if (this._editing) { this._pendingRemote = remote; return; }  // no pisar lo que se escribe
+      this._pendingRemote = null;
+      doc = normalizeDoc(remote);
+      state = activeSheet();
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(doc)); } catch {}
+      render();
+      flashStatus('actualizado desde la nube');
+    },
+  };
+
   // ---------------- State ----------------
-  let state = loadState() || defaultState();
+  let doc = loadDoc() || defaultDoc();
+  let state = activeSheet();          // hoja activa (referencia dentro de doc.sheets)
   let saveTimer = null;
 
-  function loadState() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return null;
-      const obj = JSON.parse(raw);
-      if (!obj || !Array.isArray(obj.columns) || !Array.isArray(obj.rows)) return null;
-      return normalize(obj);
-    } catch { return null; }
+  function activeSheet() {
+    return doc.sheets.find(s => s.id === doc.activeId) || doc.sheets[0];
   }
 
-  function normalize(obj) {
-    const columns = obj.columns.map(c => ({
+  function loadDoc() {
+    // 1. Documento v2 (multi-hoja)
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const obj = JSON.parse(raw);
+        if (obj && Array.isArray(obj.sheets) && obj.sheets.length) {
+          return normalizeDoc(obj);
+        }
+      }
+    } catch { /* sigue al fallback */ }
+
+    // 2. Migración desde v1 (una sola tabla) -> primera hoja
+    try {
+      const legacy = localStorage.getItem(LEGACY_KEY);
+      if (legacy) {
+        const obj = JSON.parse(legacy);
+        if (obj && Array.isArray(obj.columns) && Array.isArray(obj.rows)) {
+          const sheet = normalizeSheet({ ...obj, id: uid(), name: 'Set 1' });
+          return { activeId: sheet.id, sheets: [sheet] };
+        }
+      }
+    } catch { /* sigue al fallback */ }
+
+    return null;
+  }
+
+  function normalizeDoc(obj) {
+    const sheets = obj.sheets
+      .map(s => normalizeSheet(s))
+      .filter(Boolean);
+    if (!sheets.length) return defaultDoc();
+    const activeId = sheets.some(s => s.id === obj.activeId) ? obj.activeId : sheets[0].id;
+    return { activeId, sheets };
+  }
+
+  function normalizeSheet(s) {
+    if (!s || !Array.isArray(s.columns) || !Array.isArray(s.rows)) return null;
+    const columns = s.columns.map(c => ({
       name: typeof c.name === 'string' ? c.name : '',
       width: Number.isFinite(c.width) ? c.width : null,
       time: !!c.time,
     }));
     const colCount = columns.length;
-    const rows = obj.rows.map(r => {
+    const rows = s.rows.map(r => {
       const cells = Array.isArray(r.cells) ? r.cells.slice(0, colCount) : [];
       while (cells.length < colCount) cells.push('');
-      return { cells: cells.map(v => v == null ? '' : String(v)) };
+      return {
+        cells: cells.map(v => v == null ? '' : String(v)),
+        color: typeof r.color === 'string' ? r.color : '',
+      };
     });
-    return { columns, rows };
+    return {
+      id: typeof s.id === 'string' && s.id ? s.id : uid(),
+      name: typeof s.name === 'string' && s.name.trim() ? s.name : 'Set',
+      columns,
+      rows,
+    };
   }
 
   function scheduleSave() {
@@ -228,13 +429,26 @@
   }
 
   function saveNow() {
-    state = readStateFromDom();
+    syncActiveFromDom();
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(doc));
       flashStatus('guardado');
     } catch (e) {
       flashStatus('error guardando', true);
     }
+    if (typeof TT._saveHook === 'function') {
+      try { TT._saveHook(doc); } catch (e) { /* la nube se reintenta sola */ }
+    }
+  }
+
+  // Vuelca el DOM a la hoja activa dentro de doc.
+  function syncActiveFromDom() {
+    const fresh = readSheetFromDom();
+    const idx = doc.sheets.findIndex(s => s.id === doc.activeId);
+    if (idx === -1) return;
+    doc.sheets[idx].columns = fresh.columns;
+    doc.sheets[idx].rows = fresh.rows;
+    state = doc.sheets[idx];
   }
 
   function flashStatus(msg, isError) {
@@ -245,7 +459,7 @@
     flashStatus._t = setTimeout(() => { el.textContent = ''; }, 1200);
   }
 
-  function readStateFromDom() {
+  function readSheetFromDom() {
     const dataThs = [...document.querySelectorAll('thead th.data-col')];
     const columns = dataThs.map(th => ({
       name: th.querySelector('.col-name').textContent,
@@ -254,6 +468,7 @@
     }));
     const rows = [...tbody.querySelectorAll('tr')].map(tr => ({
       cells: [...tr.querySelectorAll('td.data-cell')].map(td => td.textContent),
+      color: tr.dataset.color || '',
     }));
     return { columns, rows };
   }
@@ -262,8 +477,11 @@
   const headRow = document.getElementById('headRow');
   const tbody = document.getElementById('rows');
   const footRow = document.getElementById('footRow');
+  const sheetSelect = document.getElementById('sheetSelect');
 
   function render() {
+    renderSheetSelect();
+
     // Header
     headRow.innerHTML = '';
     headRow.appendChild(th('handle', ''));
@@ -280,6 +498,17 @@
 
     renumber();
     recalcTotal();
+  }
+
+  function renderSheetSelect() {
+    sheetSelect.innerHTML = '';
+    doc.sheets.forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s.id;
+      opt.textContent = s.name;
+      sheetSelect.appendChild(opt);
+    });
+    sheetSelect.value = doc.activeId;
   }
 
   function th(cls, text) {
@@ -302,6 +531,14 @@
     name.addEventListener('input', scheduleSave);
     el.appendChild(name);
 
+    const delBtn = document.createElement('button');
+    delBtn.className = 'col-del';
+    delBtn.title = 'Eliminar columna';
+    delBtn.textContent = '✕';
+    delBtn.addEventListener('mousedown', e => e.stopPropagation());
+    delBtn.addEventListener('click', () => deleteColumn(idx));
+    el.appendChild(delBtn);
+
     const handle = document.createElement('div');
     handle.className = 'resize-handle';
     handle.title = 'Arrastra para redimensionar';
@@ -314,6 +551,7 @@
   function buildRow(rowState) {
     const tr = document.createElement('tr');
     tr.draggable = false;
+    applyRowColor(tr, rowState.color || '');
 
     const handleTd = document.createElement('td');
     handleTd.className = 'handle';
@@ -336,6 +574,17 @@
 
     const actionsTd = document.createElement('td');
     actionsTd.className = 'actions';
+
+    const colorBtn = document.createElement('button');
+    colorBtn.className = 'color-btn';
+    colorBtn.title = 'Color de fila';
+    colorBtn.textContent = '●';
+    if (rowState.color) {
+      colorBtn.classList.add('has-color');
+      colorBtn.style.color = rowState.color;
+    }
+    actionsTd.appendChild(colorBtn);
+
     const del = document.createElement('button');
     del.className = 'del';
     del.title = 'Eliminar fila';
@@ -347,12 +596,21 @@
     return tr;
   }
 
+  function applyRowColor(tr, color) {
+    tr.dataset.color = color || '';
+    if (color) tr.style.setProperty('--row-color', color);
+    else tr.style.removeProperty('--row-color');
+    const btn = tr.querySelector('button.color-btn');
+    if (btn) {
+      btn.classList.toggle('has-color', !!color);
+      btn.style.color = color || '';
+    }
+  }
+
   function renderFooter() {
     footRow.innerHTML = '';
     footRow.appendChild(td('', ''));               // handle col
     footRow.appendChild(td('', ''));               // num col
-    // For each data col: only the time col shows the total; others are blank.
-    // Non-time cols before the first time col become a "Total" label spanning them.
     const timeIdx = state.columns.findIndex(c => c.time);
     if (timeIdx === -1) {
       state.columns.forEach(() => footRow.appendChild(td('', '')));
@@ -363,14 +621,12 @@
         label.style.textAlign = 'right';
         footRow.appendChild(label);
       } else {
-        // time col is first; put label in num col instead
         footRow.lastChild.textContent = 'Total';
         footRow.lastChild.style.textAlign = 'right';
       }
       const totalCell = td('time', '00:00');
       totalCell.id = 'total';
       footRow.appendChild(totalCell);
-      // remaining cols after time
       for (let i = timeIdx + 1; i < state.columns.length; i++) {
         footRow.appendChild(td('', ''));
       }
@@ -389,6 +645,7 @@
   function wireRow(tr) {
     const handle = tr.querySelector('td.handle');
     const del = tr.querySelector('button.del');
+    const colorBtn = tr.querySelector('button.color-btn');
 
     handle.addEventListener('mousedown', () => { tr.draggable = true; });
     handle.addEventListener('mouseup',   () => { tr.draggable = false; });
@@ -413,6 +670,11 @@
       scheduleSave();
     });
 
+    colorBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      openColorPop(colorBtn, tr);
+    });
+
     tr.querySelectorAll('td.data-cell').forEach(td => {
       td.addEventListener('input', () => {
         if (td.dataset.time === 'true') recalcTotal();
@@ -433,6 +695,51 @@
       }
     });
   }
+
+  // ---------------- Popover de color ----------------
+  const colorPop = document.getElementById('colorPop');
+  let colorTargetRow = null;
+
+  PALETTE.forEach(p => {
+    const sw = document.createElement('button');
+    sw.className = 'swatch' + (p.value ? '' : ' none');
+    sw.title = p.name;
+    if (p.value) sw.style.background = p.value;
+    else sw.textContent = '✕';
+    sw.addEventListener('click', () => {
+      if (colorTargetRow) {
+        applyRowColor(colorTargetRow, p.value);
+        scheduleSave();
+      }
+      closeColorPop();
+    });
+    colorPop.appendChild(sw);
+  });
+
+  function openColorPop(btn, tr) {
+    colorTargetRow = tr;
+    const r = btn.getBoundingClientRect();
+    colorPop.classList.add('open');
+    const popW = colorPop.offsetWidth;
+    let left = window.scrollX + r.right - popW;
+    if (left < 8) left = 8;
+    colorPop.style.left = left + 'px';
+    colorPop.style.top = (window.scrollY + r.bottom + 4) + 'px';
+  }
+
+  function closeColorPop() {
+    colorPop.classList.remove('open');
+    colorTargetRow = null;
+  }
+
+  document.addEventListener('click', e => {
+    if (colorPop.classList.contains('open') &&
+        !colorPop.contains(e.target) &&
+        !e.target.classList.contains('color-btn')) {
+      closeColorPop();
+    }
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeColorPop(); });
 
   // ---------------- Drag & drop rows ----------------
   tbody.addEventListener('dragover', e => {
@@ -525,9 +832,9 @@
     totalEl.textContent = formatTime(total);
   }
 
-  // ---------------- Toolbar ----------------
+  // ---------------- Toolbar: filas / columnas ----------------
   document.getElementById('addRow').addEventListener('click', () => {
-    const empty = { cells: state.columns.map(() => '') };
+    const empty = { cells: state.columns.map(() => ''), color: '' };
     tbody.appendChild(buildRow(empty));
     renumber();
     scheduleSave();
@@ -537,26 +844,100 @@
     const name = prompt('Nombre de la nueva columna:', 'Columna');
     if (name == null) return;
     const isTime = confirm('¿Es una columna de tiempo (mm:ss / hh:mm:ss)?\n\nAceptar = sí, Cancelar = no');
-    state = readStateFromDom();
+    syncActiveFromDom();
     state.columns.push({ name: name || 'Columna', width: 160, time: isTime });
     state.rows.forEach(r => r.cells.push(''));
     render();
     scheduleSave();
   });
 
+  // ---------------- Toolbar: hojas (sets) ----------------
+  sheetSelect.addEventListener('change', () => {
+    syncActiveFromDom();           // guarda la hoja actual antes de cambiar
+    doc.activeId = sheetSelect.value;
+    state = activeSheet();
+    render();
+    saveNow();
+  });
+
+  document.getElementById('newSheet').addEventListener('click', () => {
+    const name = prompt('Nombre del nuevo set:', 'Set ' + (doc.sheets.length + 1));
+    if (name == null) return;
+    syncActiveFromDom();
+    const s = defaultSheet(name.trim() || ('Set ' + (doc.sheets.length + 1)));
+    doc.sheets.push(s);
+    doc.activeId = s.id;
+    state = s;
+    render();
+    saveNow();
+  });
+
+  document.getElementById('renameSheet').addEventListener('click', () => {
+    const cur = activeSheet();
+    const name = prompt('Nuevo nombre del set:', cur.name);
+    if (name == null) return;
+    cur.name = name.trim() || cur.name;
+    render();
+    saveNow();
+  });
+
+  document.getElementById('dupSheet').addEventListener('click', () => {
+    syncActiveFromDom();
+    const cur = activeSheet();
+    const copy = normalizeSheet(JSON.parse(JSON.stringify(cur)));
+    copy.id = uid();
+    copy.name = cur.name + ' (copia)';
+    doc.sheets.push(copy);
+    doc.activeId = copy.id;
+    state = copy;
+    render();
+    saveNow();
+  });
+
+  document.getElementById('delSheet').addEventListener('click', () => {
+    if (doc.sheets.length <= 1) {
+      alert('No puedes eliminar la única hoja. Usa "Reset hoja" para vaciarla.');
+      return;
+    }
+    const cur = activeSheet();
+    if (!confirm(`¿Eliminar el set "${cur.name}"? No se puede deshacer.`)) return;
+    doc.sheets = doc.sheets.filter(s => s.id !== cur.id);
+    doc.activeId = doc.sheets[0].id;
+    state = activeSheet();
+    render();
+    saveNow();
+  });
+
+  // ---------------- Toolbar: export / import ----------------
+  function deleteColumn(idx) {
+    syncActiveFromDom();
+    if (state.columns.length <= 1) {
+      alert('No puedes eliminar la única columna.');
+      return;
+    }
+    const col = state.columns[idx];
+    if (!confirm(`¿Eliminar la columna "${col && col.name ? col.name : ''}"? Se borra su contenido en todas las filas.`)) return;
+    state.columns.splice(idx, 1);
+    state.rows.forEach(r => r.cells.splice(idx, 1));
+    render();
+    saveNow();
+  }
+
   document.getElementById('exportCsv').addEventListener('click', () => {
+    syncActiveFromDom();
     const headers = state.columns.map(c => csvCell(c.name));
     const lines = [headers.join(',')];
-    [...tbody.querySelectorAll('tr')].forEach(tr => {
-      const cells = [...tr.querySelectorAll('td.data-cell')].map(td => csvCell(td.textContent));
-      lines.push(cells.join(','));
+    state.rows.forEach(r => {
+      lines.push(r.cells.map(v => csvCell(v)).join(','));
     });
-    download('tabla-tiempos.csv', lines.join('\n'), 'text/csv;charset=utf-8');
+    download(fileName(state.name, 'csv'), lines.join('\n'), 'text/csv;charset=utf-8');
   });
 
   document.getElementById('exportJson').addEventListener('click', () => {
-    const data = readStateFromDom();
-    download('tabla-tiempos.json', JSON.stringify(data, null, 2), 'application/json');
+    syncActiveFromDom();
+    const cur = activeSheet();
+    // Exporta el set activo completo (incluye nombre y colores de fila).
+    download(fileName(cur.name, 'json'), JSON.stringify(cur, null, 2), 'application/json');
   });
 
   document.getElementById('importFile').addEventListener('change', e => {
@@ -566,13 +947,26 @@
     reader.onload = ev => {
       try {
         const obj = JSON.parse(ev.target.result);
-        if (!obj || !Array.isArray(obj.columns) || !Array.isArray(obj.rows)) {
+        let added = 0;
+        if (obj && Array.isArray(obj.sheets)) {
+          // Documento multi-hoja: añade todas las hojas como nuevos sets.
+          obj.sheets.forEach(s => {
+            const ns = normalizeSheet(s);
+            if (ns) { ns.id = uid(); doc.sheets.push(ns); added++; }
+          });
+        } else if (obj && Array.isArray(obj.columns) && Array.isArray(obj.rows)) {
+          // Una sola hoja/set -> nuevo set.
+          const ns = normalizeSheet({ ...obj, id: uid(), name: obj.name || 'Set importado' });
+          if (ns) { doc.sheets.push(ns); added++; }
+        } else {
           throw new Error('Formato inválido');
         }
-        state = normalize(obj);
+        if (!added) throw new Error('Sin hojas válidas');
+        doc.activeId = doc.sheets[doc.sheets.length - 1].id;
+        state = activeSheet();
         render();
         saveNow();
-        flashStatus('importado');
+        flashStatus(added > 1 ? `importados ${added} sets` : 'set importado');
       } catch (err) {
         alert('No se pudo importar: ' + err.message);
       } finally {
@@ -583,16 +977,29 @@
   });
 
   document.getElementById('reset').addEventListener('click', () => {
-    if (!confirm('¿Borrar todos los datos y volver al estado por defecto?')) return;
-    localStorage.removeItem(STORAGE_KEY);
-    state = defaultState();
+    const cur = activeSheet();
+    if (!confirm(`¿Vaciar el set "${cur.name}" y volver al estado por defecto?`)) return;
+    const fresh = defaultSheet(cur.name);
+    fresh.id = cur.id;
+    const idx = doc.sheets.findIndex(s => s.id === cur.id);
+    doc.sheets[idx] = fresh;
+    state = fresh;
     render();
+    saveNow();
   });
 
   function csvCell(s) {
     s = (s || '').trim();
     if (/[",\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
     return s;
+  }
+
+  function fileName(name, ext) {
+    const slug = (name || 'tabla-tiempos')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'tabla-tiempos';
+    return `${slug}.${ext}`;
   }
 
   function download(filename, content, mime) {
@@ -605,8 +1012,165 @@
     URL.revokeObjectURL(url);
   }
 
+  // ---------------- Edición: no aplicar cambios remotos mientras se escribe ----------------
+  const grid = document.getElementById('grid');
+  grid.addEventListener('focusin', e => {
+    if (e.target.isContentEditable) TT._editing = true;
+  });
+  grid.addEventListener('focusout', () => {
+    setTimeout(() => {
+      const a = document.activeElement;
+      if (a && a.isContentEditable && grid.contains(a)) return; // saltó a otra celda
+      TT._editing = false;
+      if (TT._pendingRemote) TT.applyRemote(TT._pendingRemote);
+    }, 0);
+  });
+
   // ---------------- Init ----------------
   render();
+</script>
+
+<script type="module">
+/* ============================================================
+   CONFIG FIREBASE — pega aquí la config de tu proyecto Web.
+   Firebase Console > Configuración del proyecto > Tus apps > Web.
+   Mientras tenga "PEGA_AQUI", la app funciona SOLO en este navegador.
+   ============================================================ */
+const firebaseConfig = {
+  apiKey:            "AIzaSyD1BqzZ8bWdlwxSPARm8UeCilJ77VcbTgo",
+  authDomain:        "tabla-tiempos.firebaseapp.com",
+  projectId:         "tabla-tiempos",
+  storageBucket:     "tabla-tiempos.firebasestorage.app",
+  messagingSenderId: "762214301085",
+  appId:             "1:762214301085:web:6254635e53fed3de984374",
+  // Pega aquí la URL de tu Realtime Database (Firebase Console > Realtime
+  // Database). Tiene esta forma: https://tabla-tiempos-default-rtdb.<region>.firebasedatabase.app
+  databaseURL:       "https://tabla-tiempos-default-rtdb.europe-west1.firebasedatabase.app",
+};
+
+(async () => {
+  const CONFIGURED = !Object.values(firebaseConfig).some(v => String(v).includes("PEGA_AQUI"));
+
+  const CODE_KEY = 'tabla-tiempos-libcode';
+  const dot      = document.getElementById('syncDot');
+  const msg      = document.getElementById('syncMsg');
+  const codeWrap = document.getElementById('syncCodeWrap');
+  const codeEl   = document.getElementById('syncCode');
+  const codeBtn  = document.getElementById('syncCodeBtn');
+  const copyBtn  = document.getElementById('syncCopyBtn');
+
+  const setStatus = (kind, text) => { dot.className = 'dot ' + kind; msg.textContent = text; };
+  const genCode   = () => Math.random().toString(36).slice(2, 7) + Math.random().toString(36).slice(2, 7);
+  const normCode  = s => (s || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  const getCode   = () => {
+    let c = localStorage.getItem(CODE_KEY);
+    if (!c) { c = genCode(); localStorage.setItem(CODE_KEY, c); }
+    return c;
+  };
+
+  if (!CONFIGURED) {
+    setStatus('off', 'Sin nube — solo este dispositivo');
+    codeBtn.style.display = '';
+    codeBtn.textContent = 'Cómo activar la nube';
+    codeBtn.onclick = () => alert(
+      'Para sincronizar entre ordenador y móvil:\n\n' +
+      '1. Firebase Console > Realtime Database > Crear base de datos.\n' +
+      '2. Copia su URL (https://...-rtdb...firebasedatabase.app).\n' +
+      '3. Pégala en databaseURL del <script type="module"> de index.html.\n' +
+      '4. Aplica las reglas de seguridad y publica la web.\n\n' +
+      'Hasta entonces los datos se guardan solo en este navegador.'
+    );
+    return;
+  }
+
+  let db, dbRef, unsub = null, code = getCode();
+  let applyingRemote = false, pushTimer = null, lastSyncedJSON = '';
+
+  let initializeApp, getDatabase, ref, onValue, set;
+  try {
+    ({ initializeApp } = await import('https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js'));
+    ({ getDatabase, ref, onValue, set } =
+      await import('https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js'));
+  } catch (e) {
+    setStatus('off', 'No se pudo cargar la nube — solo este dispositivo');
+    console.error(e);
+    return;
+  }
+
+  db = getDatabase(initializeApp(firebaseConfig));
+
+  TT.setSaveHook(() => {
+    if (applyingRemote) return;
+    clearTimeout(pushTimer);
+    pushTimer = setTimeout(push, 300);
+  });
+
+  async function push() {
+    if (!dbRef) return;
+    // Guardamos el documento como string JSON para que Realtime Database no
+    // convierta los arrays (sheets/rows/cells) en objetos al leerlos.
+    const json = JSON.stringify(TT.getDoc());
+    lastSyncedJSON = json;
+    try {
+      setStatus('busy', 'Guardando…');
+      await set(dbRef, { data: json, updatedAt: Date.now() });
+      setStatus('ok', 'Sincronizado');
+    } catch (e) {
+      setStatus('off', 'Sin conexión — se reintentará');
+      console.error(e);
+    }
+  }
+
+  function subscribe(c) {
+    if (unsub) { unsub(); unsub = null; }
+    code = c;
+    dbRef = ref(db, 'libraries/' + c);
+    codeWrap.style.display = '';
+    codeEl.textContent = c;
+    setStatus('busy', 'Conectando…');
+    let first = true;
+    unsub = onValue(dbRef, snap => {
+      const payload = snap.val();
+      if (payload && typeof payload.data === 'string') {
+        if (payload.data !== lastSyncedJSON) {
+          try {
+            const parsed = JSON.parse(payload.data);
+            applyingRemote = true;
+            try { TT.applyRemote(parsed); } finally { applyingRemote = false; }
+            lastSyncedJSON = payload.data;
+          } catch (e) { console.error('JSON remoto inválido', e); }
+        }
+        setStatus('ok', 'Sincronizado');
+      } else if (first) {
+        push();   // nodo vacío: sube lo que haya ahora
+      }
+      first = false;
+    }, err => { setStatus('off', 'Error de sincronización'); console.error(err); });
+  }
+
+  codeBtn.style.display = '';
+  copyBtn.style.display = '';
+  codeBtn.onclick = () => {
+    const input = prompt(
+      'Código de tu biblioteca de sets.\n\n' +
+      'Usa el MISMO código en el ordenador y en el móvil para ver los mismos sets.\n' +
+      'Vacío + Aceptar = generar uno nuevo.',
+      code
+    );
+    if (input === null) return;
+    const c = normCode(input) || genCode();
+    localStorage.setItem(CODE_KEY, c);
+    lastSyncedJSON = '';
+    subscribe(c);
+  };
+  copyBtn.onclick = async () => {
+    try { await navigator.clipboard.writeText(code); copyBtn.textContent = '¡Copiado!'; }
+    catch { copyBtn.textContent = code; }
+    setTimeout(() => { copyBtn.textContent = 'Copiar código'; }, 1500);
+  };
+
+  subscribe(code);
+})();
 </script>
 </body>
 </html>
