@@ -245,9 +245,96 @@
   }
   #colorPop .swatch:hover { outline: 2px solid var(--accent); outline-offset: 1px; }
 
+  /* ---------- Selector de temas del catálogo (publicado desde Masterizer) ---------- */
+  #songPick {
+    position: fixed;
+    inset: 0;
+    display: none;
+    z-index: 100;
+    background: rgba(20,20,18,0.35);
+    padding: 40px 16px;
+  }
+  #songPick.open { display: block; }
+  .sp-panel {
+    max-width: 560px;
+    margin: 0 auto;
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.25);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100vh - 80px);
+  }
+  .sp-head {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .sp-head input {
+    font: inherit;
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+  }
+  .sp-head input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .sp-meta {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 6px;
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .sp-list { overflow-y: auto; }
+  .sp-item {
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 10px;
+  }
+  .sp-item:last-child { border-bottom: none; }
+  .sp-item:hover, .sp-item.active { background: var(--accent-bg); }
+  .sp-name { font-weight: 500; }
+  .sp-genre {
+    font-size: 11px;
+    color: var(--accent);
+    background: var(--accent-bg);
+    border-radius: 3px;
+    padding: 1px 5px;
+    margin-left: 6px;
+  }
+  .sp-stats {
+    font: 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .sp-empty {
+    padding: 24px 16px;
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  .sp-foot {
+    padding: 8px 14px;
+    border-top: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--muted);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+  }
+
   @media (max-width: 640px) {
     body { padding: 14px; }
     .saved-status { margin-left: 0; }
+    #songPick { padding: 12px 8px; }
+    .sp-panel { max-height: calc(100vh - 24px); }
   }
 </style>
 </head>
@@ -278,6 +365,7 @@
 </div>
 
 <div class="toolbar">
+  <button id="addSong">+ Tema</button>
   <button id="addRow">+ Fila</button>
   <button id="addCol">+ Columna</button>
   <button id="exportCsv">Exportar CSV</button>
@@ -297,6 +385,24 @@
 </table>
 
 <div id="colorPop"></div>
+
+<!-- Selector de temas: catálogo publicado desde Masterizer -->
+<div id="songPick">
+  <div class="sp-panel">
+    <div class="sp-head">
+      <input type="search" id="spSearch" placeholder="Buscar tema…" autocomplete="off">
+      <div class="sp-meta">
+        <span id="spCount"></span>
+        <span id="spUpdated"></span>
+      </div>
+    </div>
+    <div class="sp-list" id="spList"></div>
+    <div class="sp-foot">
+      <span>↑↓ para moverte · Enter para añadir · Esc para cerrar</span>
+      <button id="spClose">Cerrar</button>
+    </div>
+  </div>
+</div>
 
 <script>
   const STORAGE_KEY = 'tabla-tiempos-v2';
@@ -851,6 +957,206 @@
     scheduleSave();
   });
 
+  // ---------------- Catálogo de temas (publicado desde Masterizer) ----------------
+  // El masterizer escribe el catálogo en libraries/<código>/catalog. Aquí llega
+  // solo, por la misma suscripción que sincroniza los sets. Se guarda copia en
+  // este navegador para poder elegir temas sin cobertura, que es lo normal en
+  // un bolo.
+  const CATALOG_KEY = 'tabla-tiempos-catalog';
+  let catalog = { songs: [], updatedAt: 0 };
+
+  try {
+    const raw = localStorage.getItem(CATALOG_KEY);
+    if (raw) {
+      const obj = JSON.parse(raw);
+      if (obj && Array.isArray(obj.songs)) catalog = obj;
+    }
+  } catch { /* catálogo vacío */ }
+
+  // Lo llama el módulo de Firebase cuando llega un catálogo nuevo.
+  TT.setCatalog = function (node) {
+    if (!node || typeof node.data !== 'string') return;
+    let parsed;
+    try { parsed = JSON.parse(node.data); } catch { return; }
+    if (!parsed || !Array.isArray(parsed.songs)) return;
+    catalog = { songs: parsed.songs, updatedAt: node.updatedAt || Date.now() };
+    try { localStorage.setItem(CATALOG_KEY, JSON.stringify(catalog)); } catch {}
+    if (songPick.classList.contains('open')) renderSongList();
+  };
+
+  const songPick   = document.getElementById('songPick');
+  const spSearch   = document.getElementById('spSearch');
+  const spList     = document.getElementById('spList');
+  const spCount    = document.getElementById('spCount');
+  const spUpdated  = document.getElementById('spUpdated');
+  let spActive = 0;
+
+  const normText = s => (s || '').toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+  function songMatches() {
+    const q = normText(spSearch.value.trim());
+    if (!q) return catalog.songs;
+    return catalog.songs.filter(s =>
+      normText(s.name).includes(q) || normText(s.genre).includes(q));
+  }
+
+  // Reparte los datos de un tema entre las columnas de la hoja: la de tiempo
+  // recibe la duración, las que se llamen BPM/LUFS/Género/Tono lo suyo, y el
+  // nombre cae en la primera columna libre que no sea de tiempo.
+  function mapSongToColumns(song, columns) {
+    const out = columns.map(() => '');
+    const used = new Set();
+    let hasGenreCol = false;
+
+    columns.forEach((col, i) => {
+      const n = normText(col.name);
+      if (col.time) {
+        if (song.dur) out[i] = formatTime(song.dur);
+        used.add(i);
+      } else if (/bpm|tempo/.test(n)) {
+        if (song.bpm) out[i] = String(song.bpm);
+        used.add(i);
+      } else if (/lufs/.test(n)) {
+        if (song.lufs != null) out[i] = String(song.lufs);
+        used.add(i);
+      } else if (/genero|genre|estilo/.test(n)) {
+        out[i] = song.genre || '';
+        used.add(i);
+        hasGenreCol = true;
+      } else if (/tonalidad|tono|^key$/.test(n)) {
+        out[i] = song.key || '';
+        used.add(i);
+      } else if (/energ/.test(n)) {
+        if (song.energy) out[i] = String(song.energy);
+        used.add(i);
+      } else if (/duracion|duration|largo/.test(n)) {
+        if (song.dur) out[i] = formatTime(song.dur);
+        used.add(i);
+      }
+    });
+
+    let nameIdx = columns.findIndex((c, i) => !c.time && !used.has(i));
+    if (nameIdx === -1) nameIdx = columns.findIndex(c => !c.time);
+    if (nameIdx === -1) nameIdx = 0;
+    out[nameIdx] = song.name;
+    used.add(nameIdx);
+
+    // Sin columna de género, el género acaba en Notas: así es como estaba la
+    // tabla hasta ahora ("Psytrance", "Acid 1"…).
+    columns.forEach((col, i) => {
+      if (used.has(i)) return;
+      if (/nota|observ|coment/.test(normText(col.name))) {
+        out[i] = song.notes || (hasGenreCol ? '' : (song.genre || ''));
+        used.add(i);
+      }
+    });
+
+    return out;
+  }
+
+  function renderSongList() {
+    const rows = songMatches();
+    spCount.textContent = catalog.songs.length
+      ? `${rows.length} de ${catalog.songs.length} temas`
+      : '';
+    spUpdated.textContent = catalog.updatedAt
+      ? 'Catálogo del ' + new Date(catalog.updatedAt).toLocaleDateString('es-ES',
+          { day: '2-digit', month: 'short', year: 'numeric' })
+      : '';
+
+    if (!catalog.songs.length) {
+      spList.innerHTML = '<div class="sp-empty">' +
+        'Todavía no hay catálogo.<br><br>' +
+        'Ábrelo en <b>Masterizer → pestaña Temas</b>, pega ahí el código de biblioteca ' +
+        '(<code>' + (document.getElementById('syncCode')?.textContent || '—') + '</code>) ' +
+        'y pulsa <b>Publicar catálogo</b>. Tus temas aparecerán aquí con BPM, duración y LUFS.' +
+        '</div>';
+      return;
+    }
+    if (!rows.length) {
+      spList.innerHTML = '<div class="sp-empty">Ningún tema coincide con la búsqueda.</div>';
+      return;
+    }
+
+    spActive = Math.min(spActive, rows.length - 1);
+    spList.innerHTML = rows.map((s, i) => {
+      const stats = [
+        s.bpm ? s.bpm + ' bpm' : '',
+        s.dur ? formatTime(s.dur) : '',
+        s.lufs != null ? s.lufs + ' LUFS' : '',
+      ].filter(Boolean).join(' · ');
+      const genre = s.genre ? `<span class="sp-genre">${escapeHtml(s.genre)}</span>` : '';
+      return `<div class="sp-item${i === spActive ? ' active' : ''}" data-i="${i}">
+        <span><span class="sp-name">${escapeHtml(s.name)}</span>${genre}</span>
+        <span class="sp-stats">${stats}</span>
+      </div>`;
+    }).join('');
+  }
+
+  function escapeHtml(s) {
+    return String(s ?? '').replace(/[&<>"]/g,
+      c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  }
+
+  function openSongPick() {
+    spSearch.value = '';
+    spActive = 0;
+    songPick.classList.add('open');
+    renderSongList();
+    spSearch.focus();
+  }
+
+  function closeSongPick() {
+    songPick.classList.remove('open');
+  }
+
+  function insertSong(song) {
+    if (!song) return;
+    const cells = mapSongToColumns(song, state.columns);
+    tbody.appendChild(buildRow({ cells, color: '' }));
+    renumber();
+    recalcTotal();
+    scheduleSave();
+    flashStatus(`añadido: ${song.name}`);
+  }
+
+  document.getElementById('addSong').addEventListener('click', openSongPick);
+  document.getElementById('spClose').addEventListener('click', closeSongPick);
+  songPick.addEventListener('mousedown', (e) => {
+    if (e.target === songPick) closeSongPick();
+  });
+
+  spSearch.addEventListener('input', () => { spActive = 0; renderSongList(); });
+
+  spSearch.addEventListener('keydown', (e) => {
+    const rows = songMatches();
+    if (e.key === 'Escape') { closeSongPick(); return; }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!rows.length) return;
+      spActive = (spActive + (e.key === 'ArrowDown' ? 1 : -1) + rows.length) % rows.length;
+      renderSongList();
+      spList.querySelector('.sp-item.active')?.scrollIntoView({ block: 'nearest' });
+      return;
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (!rows.length) return;
+      insertSong(rows[spActive]);
+      // Se queda abierto: montar un set es añadir temas seguidos.
+      spSearch.select();
+    }
+  });
+
+  spList.addEventListener('click', (e) => {
+    const item = e.target.closest('.sp-item');
+    if (!item) return;
+    insertSong(songMatches()[Number(item.dataset.i)]);
+    spSearch.focus();
+    spSearch.select();
+  });
+
   // ---------------- Toolbar: hojas (sets) ----------------
   sheetSelect.addEventListener('change', () => {
     syncActiveFromDom();           // guarda la hoja actual antes de cambiar
@@ -1086,10 +1392,10 @@ const firebaseConfig = {
   let db, dbRef, unsub = null, code = getCode();
   let applyingRemote = false, pushTimer = null, lastSyncedJSON = '';
 
-  let initializeApp, getDatabase, ref, onValue, set;
+  let initializeApp, getDatabase, ref, onValue, update;
   try {
     ({ initializeApp } = await import('https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js'));
-    ({ getDatabase, ref, onValue, set } =
+    ({ getDatabase, ref, onValue, update } =
       await import('https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js'));
   } catch (e) {
     setStatus('off', 'No se pudo cargar la nube — solo este dispositivo');
@@ -1113,7 +1419,9 @@ const firebaseConfig = {
     lastSyncedJSON = json;
     try {
       setStatus('busy', 'Guardando…');
-      await set(dbRef, { data: json, updatedAt: Date.now() });
+      // update() y no set(): el nodo de la biblioteca tiene también el hijo
+      // `catalog`, que publica Masterizer. set() lo borraría en cada guardado.
+      await update(dbRef, { data: json, updatedAt: Date.now() });
       setStatus('ok', 'Sincronizado');
     } catch (e) {
       setStatus('off', 'Sin conexión — se reintentará');
@@ -1131,6 +1439,8 @@ const firebaseConfig = {
     let first = true;
     unsub = onValue(dbRef, snap => {
       const payload = snap.val();
+      // El catálogo de temas viaja en el mismo nodo, escrito por Masterizer.
+      if (payload && payload.catalog) TT.setCatalog(payload.catalog);
       if (payload && typeof payload.data === 'string') {
         if (payload.data !== lastSyncedJSON) {
           try {
