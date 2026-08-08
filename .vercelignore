@@ -1,0 +1,7 @@
+# La web son las dos páginas HTML. Lo demás no hace falta servirlo:
+# herramientas de mantenimiento, datos sueltos y copias de seguridad.
+fusionar-bibliotecas.py
+tabla-tiempos.csv
+tabla-tiempos.json
+backups/
+README.md
