@@ -1,0 +1,546 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Biblioteca de temas</title>
+<style>
+  /* ============================================================
+     Tokens de diseño. Todo el look sale de aquí: cambiar la
+     estética no debería obligar a tocar ningún componente.
+     ============================================================ */
+  :root {
+    --bg: #fafaf7;
+    --bg-panel: #ffffff;
+    --bg-soft: #f2f1ec;
+    --bg-hover: #f0efe9;
+    --fg: #1a1a1a;
+    --fg-muted: #6b6b6b;
+    --fg-faint: #9a9a95;
+    --border: #d8d8d4;
+    --border-soft: #e8e7e2;
+    --accent: #2b6cb0;
+    --accent-bg: #e8f0f9;
+    --ok: #2f9e44;
+    --warn: #b94a48;
+    --gold: #b8860b;
+    --gold-bg: #fdf6e3;
+
+    --font: -apple-system, "Segoe UI", system-ui, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+    --radius: 8px;
+    --radius-sm: 4px;
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 24px;
+    --shadow: 0 1px 3px rgba(0,0,0,0.06);
+  }
+
+  /* Tema oscuro: por preferencia del sistema, salvo que se fuerce claro. */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #17171a;
+      --bg-panel: #1f1f23;
+      --bg-soft: #26262b;
+      --bg-hover: #2c2c32;
+      --fg: #e8e8e6;
+      --fg-muted: #a0a09c;
+      --fg-faint: #6e6e6a;
+      --border: #35353b;
+      --border-soft: #2b2b31;
+      --accent: #6ba4e0;
+      --accent-bg: #1e2b3a;
+      --ok: #51cf66;
+      --warn: #e05a58;
+      --gold: #d4a82b;
+      --gold-bg: #2e2718;
+      --shadow: 0 1px 3px rgba(0,0,0,0.4);
+    }
+  }
+  /* …y por elección explícita, que gana en ambos sentidos. */
+  :root[data-theme="dark"] {
+    --bg: #17171a;
+    --bg-panel: #1f1f23;
+    --bg-soft: #26262b;
+    --bg-hover: #2c2c32;
+    --fg: #e8e8e6;
+    --fg-muted: #a0a09c;
+    --fg-faint: #6e6e6a;
+    --border: #35353b;
+    --border-soft: #2b2b31;
+    --accent: #6ba4e0;
+    --accent-bg: #1e2b3a;
+    --ok: #51cf66;
+    --warn: #e05a58;
+    --gold: #d4a82b;
+    --gold-bg: #2e2718;
+    --shadow: 0 1px 3px rgba(0,0,0,0.4);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    font: 14px/1.5 var(--font);
+    background: var(--bg);
+    color: var(--fg);
+    margin: 0;
+    padding: var(--space-5);
+    -webkit-text-size-adjust: 100%;
+  }
+
+  header { margin-bottom: var(--space-4); }
+  .titlebar {
+    display: flex; align-items: baseline; gap: var(--space-3);
+    flex-wrap: wrap; margin-bottom: var(--space-1);
+  }
+  h1 { font-size: 18px; font-weight: 600; margin: 0; }
+  .sub { color: var(--fg-muted); font-size: 12px; }
+  .spacer { flex: 1; }
+
+  button, .btn {
+    font: inherit; padding: 6px 12px; cursor: pointer;
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+    background: var(--bg-panel); color: var(--fg);
+  }
+  button:hover, .btn:hover { background: var(--bg-hover); }
+  button.mini { padding: 3px 8px; font-size: 12px; }
+
+  .toolbar {
+    display: flex; gap: var(--space-2); align-items: center;
+    flex-wrap: wrap; margin: var(--space-3) 0;
+  }
+  input[type="search"] {
+    font: inherit; padding: 7px 10px; min-width: 220px; flex: 1; max-width: 420px;
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+    background: var(--bg-panel); color: var(--fg);
+  }
+  input[type="search"]:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+  .status { font-size: 12px; color: var(--fg-muted); }
+  .status .dot {
+    width: 8px; height: 8px; border-radius: 50%; background: var(--fg-faint);
+    display: inline-block; vertical-align: middle; margin-right: 5px;
+  }
+  .status .dot.ok { background: var(--ok); }
+  .status .dot.off { background: var(--warn); }
+
+  /* Maestro-detalle: lista de temas + panel de versiones */
+  .layout {
+    display: grid; grid-template-columns: minmax(240px, 320px) 1fr;
+    gap: var(--space-4); align-items: start;
+  }
+  .panel {
+    background: var(--bg-panel); border: 1px solid var(--border);
+    border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden;
+  }
+  .song-list { max-height: calc(100vh - 210px); overflow-y: auto; }
+  .song {
+    padding: 9px var(--space-3); border-bottom: 1px solid var(--border-soft);
+    cursor: pointer; display: flex; justify-content: space-between;
+    align-items: baseline; gap: var(--space-2);
+  }
+  .song:last-child { border-bottom: none; }
+  .song:hover { background: var(--bg-hover); }
+  .song.sel { background: var(--accent-bg); }
+  .song-name { font-weight: 500; }
+  .song.archived .song-name { color: var(--fg-muted); font-weight: 400; }
+  .song-count {
+    font: 11px/1 var(--font-mono); color: var(--fg-faint);
+    background: var(--bg-soft); border-radius: 10px; padding: 3px 7px;
+    white-space: nowrap;
+  }
+  .tag {
+    font-size: 10px; color: var(--accent); background: var(--accent-bg);
+    border-radius: 3px; padding: 1px 5px; margin-left: 5px;
+  }
+
+  .detail { padding: var(--space-4); }
+  .detail h2 { font-size: 17px; margin: 0 0 var(--space-1); }
+  .detail .meta { color: var(--fg-muted); font-size: 12px; margin-bottom: var(--space-4); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th {
+    text-align: left; font-size: 10px; font-weight: 600; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--fg-faint);
+    padding: 6px 8px; border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  td {
+    padding: 7px 8px; border-bottom: 1px solid var(--border-soft);
+    vertical-align: middle;
+  }
+  tr:last-child td { border-bottom: none; }
+  tr.def td { background: var(--gold-bg); }
+  .num { text-align: right; font-family: var(--font-mono); font-size: 12px; white-space: nowrap; }
+  .vname { font-weight: 500; }
+  .vdate { color: var(--fg-faint); font-size: 11px; white-space: nowrap; }
+  .star { color: var(--gold); }
+
+  /* Barra de LUFS: sitúa cada versión entre -30 y 0 dB */
+  .lufsbar {
+    position: relative; height: 6px; min-width: 90px;
+    background: var(--bg-soft); border-radius: 3px; overflow: hidden;
+  }
+  .lufsbar > span {
+    position: absolute; left: 0; top: 0; bottom: 0;
+    background: var(--accent); opacity: .75;
+  }
+  .lufsbar.hot > span { background: var(--warn); }
+
+  .empty { padding: var(--space-5); color: var(--fg-muted); line-height: 1.7; }
+  .empty code {
+    font: 12px var(--font-mono); background: var(--accent-bg);
+    color: var(--accent); padding: 2px 6px; border-radius: 3px;
+  }
+  .foot {
+    margin-top: var(--space-4); font-size: 11px; color: var(--fg-faint);
+    display: flex; gap: var(--space-3); flex-wrap: wrap;
+  }
+  .foot a { color: var(--accent); }
+
+  .table-wrap { overflow-x: auto; }
+
+  @media (max-width: 720px) {
+    body { padding: var(--space-3); }
+    .layout { grid-template-columns: 1fr; }
+    .song-list { max-height: 300px; }
+    /* Con la tabla desplazable, partir los nombres solo hace filas altísimas. */
+    .vname { white-space: nowrap; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="titlebar">
+    <h1 data-i18n="title">Biblioteca de temas</h1>
+    <span class="sub" data-i18n="subtitle">Métricas de cada versión, sin necesidad de tener el audio</span>
+    <span class="spacer"></span>
+    <button id="themeBtn" class="mini" title="Tema claro / oscuro">◐</button>
+    <button id="langBtn" class="mini">EN</button>
+  </div>
+  <div class="toolbar">
+    <input type="search" id="search" data-i18n-ph="search" placeholder="Buscar tema…" autocomplete="off">
+    <label class="status"><input type="checkbox" id="showArchived"> <span data-i18n="show_archived">Ver los que no están en el set</span></label>
+    <span class="spacer"></span>
+    <span class="status" id="status"><span class="dot"></span><span id="statusMsg"></span></span>
+    <button id="refreshBtn" class="mini" data-i18n="refresh">Actualizar</button>
+  </div>
+</header>
+
+<div class="layout">
+  <div class="panel"><div class="song-list" id="songList"></div></div>
+  <div class="panel"><div class="detail" id="detail"></div></div>
+</div>
+
+<div class="foot">
+  <a href="./index.html" data-i18n="back_to_table">← Tabla de tiempos</a>
+  <span id="footMeta"></span>
+</div>
+
+<script>
+/* ============================================================
+   Libro de contabilidad de los temas.
+
+   Solo lectura: el masterizer (que corre en el portátil, donde está el
+   audio) publica aquí las métricas. Esta página las lee de la Realtime
+   Database y guarda copia local, así que funciona con el portátil apagado
+   y sin cobertura.
+   ============================================================ */
+
+const DB_URL     = 'https://tabla-tiempos-default-rtdb.europe-west1.firebasedatabase.app';
+const CODE_KEY   = 'tabla-tiempos-libcode';      // el mismo que usa la tabla de tiempos
+const LEDGER_KEY = 'tabla-tiempos-ledger';
+const LANG_KEY   = 'tabla-tiempos-lang';
+const THEME_KEY  = 'tabla-tiempos-theme';
+
+const I18N = {
+  es: {
+    title: 'Biblioteca de temas',
+    subtitle: 'Métricas de cada versión, sin necesidad de tener el audio',
+    search: 'Buscar tema…',
+    show_archived: 'Ver los que no están en el set',
+    refresh: 'Actualizar',
+    back_to_table: '← Tabla de tiempos',
+    versions: 'versiones',
+    version: 'versión',
+    col_version: 'Versión',
+    col_date: 'Fecha',
+    col_dur: 'Duración',
+    col_lufs: 'LUFS',
+    col_tp: 'True peak',
+    col_lra: 'LRA',
+    col_crest: 'Cresta',
+    definitive: 'Definitiva',
+    pick_song: 'Elige un tema de la lista para ver sus versiones.',
+    no_versions: 'Este tema todavía no tiene ningún archivo analizado.',
+    no_match: 'Ningún tema coincide con la búsqueda.',
+    loading: 'Cargando…',
+    synced: 'Actualizado',
+    offline: 'Sin conexión — copia guardada',
+    no_code: 'Sin código de biblioteca',
+    empty_title: 'Todavía no hay libro publicado.',
+    empty_body: 'Abre Masterizer en tu portátil, ve a la pestaña <b>Temas</b>, pega tu código de biblioteca y pulsa <b>Publicar catálogo</b>. Aquí verás cada tema con todas sus versiones y sus métricas.',
+    empty_code: 'Tu código de biblioteca es:',
+    ask_code: 'Pega tu código de biblioteca (el mismo de la tabla de tiempos):',
+    published: 'Publicado el',
+    archived_note: 'En la biblioteca, fuera del set',
+  },
+  en: {
+    title: 'Song library',
+    subtitle: 'Metrics for every version, no audio needed',
+    search: 'Search song…',
+    show_archived: 'Show songs outside the set',
+    refresh: 'Refresh',
+    back_to_table: '← Timetable',
+    versions: 'versions',
+    version: 'version',
+    col_version: 'Version',
+    col_date: 'Date',
+    col_dur: 'Length',
+    col_lufs: 'LUFS',
+    col_tp: 'True peak',
+    col_lra: 'LRA',
+    col_crest: 'Crest',
+    definitive: 'Definitive',
+    pick_song: 'Pick a song from the list to see its versions.',
+    no_versions: 'No analyzed files for this song yet.',
+    no_match: 'No song matches your search.',
+    loading: 'Loading…',
+    synced: 'Up to date',
+    offline: 'Offline — using saved copy',
+    no_code: 'No library code',
+    empty_title: 'No ledger published yet.',
+    empty_body: 'Open Masterizer on your laptop, go to the <b>Songs</b> tab, paste your library code and hit <b>Publish catalog</b>. Every song will show up here with all its versions and metrics.',
+    empty_code: 'Your library code is:',
+    ask_code: 'Paste your library code (same one as the timetable):',
+    published: 'Published on',
+    archived_note: 'In the library, outside the set',
+  },
+};
+
+let lang = localStorage.getItem(LANG_KEY) || 'es';
+const t = k => (I18N[lang] && I18N[lang][k]) || k;
+
+let ledger = { songs: [], orphans: [], updatedAt: 0 };
+let selectedId = null;
+
+/* ---------------- Tema claro / oscuro ---------------- */
+function applyTheme() {
+  const saved = localStorage.getItem(THEME_KEY);
+  if (saved) document.documentElement.setAttribute('data-theme', saved);
+  else document.documentElement.removeAttribute('data-theme');
+}
+document.getElementById('themeBtn').addEventListener('click', () => {
+  const now = document.documentElement.getAttribute('data-theme');
+  const prefersDark = matchMedia('(prefers-color-scheme: dark)').matches;
+  const next = now ? (now === 'dark' ? 'light' : 'dark') : (prefersDark ? 'light' : 'dark');
+  localStorage.setItem(THEME_KEY, next);
+  applyTheme();
+});
+applyTheme();
+
+/* ---------------- Idioma ---------------- */
+function applyLang() {
+  document.documentElement.lang = lang;
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const v = I18N[lang][el.dataset.i18n];
+    if (v) el.textContent = v;
+  });
+  document.querySelectorAll('[data-i18n-ph]').forEach(el => {
+    const v = I18N[lang][el.dataset.i18nPh];
+    if (v) el.placeholder = v;
+  });
+  document.getElementById('langBtn').textContent = lang === 'es' ? 'EN' : 'ES';
+  render();
+}
+document.getElementById('langBtn').addEventListener('click', () => {
+  lang = lang === 'es' ? 'en' : 'es';
+  localStorage.setItem(LANG_KEY, lang);
+  applyLang();
+});
+
+/* ---------------- Datos ---------------- */
+function getCode() {
+  return localStorage.getItem(CODE_KEY) || '';
+}
+
+function setStatus(kind, msg) {
+  document.querySelector('#status .dot').className = 'dot ' + (kind || '');
+  document.getElementById('statusMsg').textContent = msg;
+}
+
+function loadLocal() {
+  try {
+    const raw = localStorage.getItem(LEDGER_KEY);
+    if (!raw) return false;
+    const obj = JSON.parse(raw);
+    if (!obj || !Array.isArray(obj.songs)) return false;
+    ledger = obj;
+    return true;
+  } catch { return false; }
+}
+
+async function fetchLedger() {
+  const code = getCode();
+  if (!code) { setStatus('off', t('no_code')); render(); return; }
+  setStatus('', t('loading'));
+  try {
+    const res = await fetch(`${DB_URL}/libraries/${encodeURIComponent(code)}/ledger.json`,
+                            { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const node = await res.json();
+    if (node && typeof node.data === 'string') {
+      const parsed = JSON.parse(node.data);
+      ledger = {
+        songs: parsed.songs || [],
+        orphans: parsed.orphans || [],
+        updatedAt: node.updatedAt || Date.now(),
+      };
+      localStorage.setItem(LEDGER_KEY, JSON.stringify(ledger));
+      setStatus('ok', t('synced'));
+    } else {
+      setStatus('ok', t('synced'));   // nodo vacío: aún no se ha publicado
+    }
+  } catch (e) {
+    setStatus('off', t('offline'));
+  }
+  render();
+}
+
+/* ---------------- Render ---------------- */
+const fmtDur = sec => {
+  if (!sec && sec !== 0) return '';
+  const s = Math.round(sec);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+};
+const esc = s => String(s ?? '').replace(/[&<>"]/g,
+  c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const normText = s => (s || '').toLowerCase()
+  .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+function visibleSongs() {
+  const q = normText(document.getElementById('search').value.trim());
+  const showArchived = document.getElementById('showArchived').checked;
+  return ledger.songs.filter(s => {
+    if (s.archived && !showArchived) return false;
+    if (!q) return true;
+    return normText(s.name).includes(q) ||
+           normText(s.genre).includes(q) ||
+           (s.versions || []).some(v => normText(v.name).includes(q));
+  });
+}
+
+function render() {
+  const list = document.getElementById('songList');
+  const songs = visibleSongs();
+
+  if (!ledger.songs.length) {
+    list.innerHTML = '';
+    document.getElementById('detail').innerHTML =
+      `<div class="empty"><b>${t('empty_title')}</b><br><br>${t('empty_body')}<br><br>` +
+      `${t('empty_code')} <code>${esc(getCode()) || '—'}</code></div>`;
+    document.getElementById('footMeta').textContent = '';
+    return;
+  }
+
+  list.innerHTML = songs.length
+    ? songs.map(s => {
+        const n = (s.versions || []).length;
+        return `<div class="song${s.id === selectedId ? ' sel' : ''}${s.archived ? ' archived' : ''}" data-id="${s.id}">
+          <span><span class="song-name">${esc(s.name)}</span>${s.genre ? `<span class="tag">${esc(s.genre)}</span>` : ''}</span>
+          <span class="song-count">${n}</span>
+        </div>`;
+      }).join('')
+    : `<div class="empty">${t('no_match')}</div>`;
+
+  renderDetail();
+
+  const total = ledger.songs.reduce((a, s) => a + (s.versions || []).length, 0);
+  document.getElementById('footMeta').textContent =
+    `${ledger.songs.length} ${t('versions') === 'versions' ? 'songs' : 'temas'} · ${total} ${t('versions')}` +
+    (ledger.updatedAt ? ` · ${t('published')} ${new Date(ledger.updatedAt).toLocaleDateString(lang === 'es' ? 'es-ES' : 'en-GB')}` : '');
+}
+
+function renderDetail() {
+  const el = document.getElementById('detail');
+  const song = ledger.songs.find(s => s.id === selectedId);
+  if (!song) { el.innerHTML = `<div class="empty">${t('pick_song')}</div>`; return; }
+
+  const versions = song.versions || [];
+  const meta = [
+    song.genre ? esc(song.genre) : '',
+    song.bpm ? `${song.bpm} bpm` : '',
+    song.dur ? fmtDur(song.dur) : '',
+    `${versions.length} ${versions.length === 1 ? t('version') : t('versions')}`,
+    song.archived ? t('archived_note') : '',
+  ].filter(Boolean).join(' · ');
+
+  if (!versions.length) {
+    el.innerHTML = `<h2>${esc(song.name)}</h2><div class="meta">${meta}</div>
+                    <div class="empty">${t('no_versions')}</div>`;
+    return;
+  }
+
+  // Barra de LUFS entre -30 y 0 dB; en rojo si pasa de -8 (muy comprimido).
+  const bar = v => {
+    if (v.lufs == null) return '';
+    const pct = Math.max(0, Math.min(100, ((v.lufs + 30) / 30) * 100));
+    return `<div class="lufsbar${v.lufs > -8 ? ' hot' : ''}"><span style="width:${pct.toFixed(1)}%"></span></div>`;
+  };
+
+  el.innerHTML = `
+    <h2>${esc(song.name)}</h2>
+    <div class="meta">${meta}</div>
+    <div class="table-wrap"><table>
+      <thead><tr>
+        <th>${t('col_version')}</th>
+        <th>${t('col_date')}</th>
+        <th class="num">${t('col_dur')}</th>
+        <th class="num">${t('col_lufs')}</th>
+        <th></th>
+        <th class="num">${t('col_tp')}</th>
+        <th class="num">${t('col_lra')}</th>
+        <th class="num">${t('col_crest')}</th>
+      </tr></thead>
+      <tbody>${versions.map(v => `
+        <tr class="${v.def ? 'def' : ''}">
+          <td><span class="vname">${esc(v.name)}</span>${v.def ? ` <span class="star" title="${t('definitive')}">★</span>` : ''}</td>
+          <td class="vdate">${esc(v.date || '')}</td>
+          <td class="num">${fmtDur(v.dur)}</td>
+          <td class="num">${v.lufs != null ? v.lufs.toFixed(1) : ''}</td>
+          <td>${bar(v)}</td>
+          <td class="num">${v.tp != null ? v.tp.toFixed(1) : ''}</td>
+          <td class="num">${v.lra != null ? v.lra.toFixed(1) : ''}</td>
+          <td class="num">${v.crest != null ? v.crest.toFixed(1) : ''}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table></div>`;
+}
+
+document.getElementById('songList').addEventListener('click', e => {
+  const row = e.target.closest('.song');
+  if (!row) return;
+  selectedId = Number(row.dataset.id);
+  render();
+});
+document.getElementById('search').addEventListener('input', render);
+document.getElementById('showArchived').addEventListener('change', render);
+document.getElementById('refreshBtn').addEventListener('click', fetchLedger);
+
+document.getElementById('status').addEventListener('click', () => {
+  const code = prompt(t('ask_code'), getCode());
+  if (code == null) return;
+  localStorage.setItem(CODE_KEY, code.trim().toLowerCase().replace(/[^a-z0-9]/g, ''));
+  localStorage.removeItem(LEDGER_KEY);
+  ledger = { songs: [], orphans: [], updatedAt: 0 };
+  fetchLedger();
+});
+
+loadLocal();
+applyLang();
+fetchLedger();
+</script>
+</body>
+</html>
