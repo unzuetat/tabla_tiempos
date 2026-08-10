@@ -339,6 +339,11 @@
     flex-wrap: wrap;
   }
   .sp-foot .sp-grow { flex: 1; }
+  .sp-picked {
+    font: 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: #2f9e44;
+    font-weight: 600;
+  }
   .sp-foot button { padding: 5px 11px; font-size: 12px; }
   .sp-foot button.primary {
     background: var(--accent); color: white; border-color: var(--accent);
@@ -421,6 +426,7 @@
     <div class="sp-list" id="spList"></div>
     <div class="sp-foot">
       <span class="sp-help">↑↓ moverte · Enter marcar · Esc cerrar</span>
+      <span class="sp-picked" id="spPicked"></span>
       <span class="sp-grow"></span>
       <button id="spNewSheet" disabled>Nueva hoja</button>
       <button id="spAdd" class="primary" disabled>Añadir</button>
@@ -1016,6 +1022,8 @@
   const spUpdated   = document.getElementById('spUpdated');
   const spAddBtn    = document.getElementById('spAdd');
   const spSheetBtn  = document.getElementById('spNewSheet');
+  const spPickedEl  = document.getElementById('spPicked');
+  const spHelpEl    = document.querySelector('.sp-help');
   let spActive = 0;
   // Ids marcados, en el orden en que se marcaron: así se monta el set.
   let spPicked = [];
@@ -1132,10 +1140,21 @@
   }
 
   function updatePickButtons() {
-    const n = spPicked.length;
+    const picked = pickedSongs();
+    const n = picked.length;
     spAddBtn.disabled = spSheetBtn.disabled = n === 0;
     spAddBtn.textContent = n ? `Añadir ${n} tema${n > 1 ? 's' : ''}` : 'Añadir';
     spSheetBtn.textContent = n ? `Nueva hoja con ${n}` : 'Nueva hoja';
+
+    // Cuánto dura lo que llevas marcado: montar un set es cuadrar minutos.
+    const total = picked.reduce((a, s) => a + (s.dur || 0), 0);
+    const sinDur = picked.filter(s => !s.dur).length;
+    spPickedEl.textContent = n
+      ? `${formatTime(total)}${sinDur ? ` (+${sinDur} sin duración)` : ''}`
+      : '';
+    // Con la selección en marcha, los botones crecen: la ayuda ya sobra y su
+    // sitio hace falta para que no salten de línea.
+    spHelpEl.style.display = n ? 'none' : '';
   }
 
   function togglePick(song) {
