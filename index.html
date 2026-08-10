@@ -299,7 +299,16 @@
   }
   .sp-item:last-child { border-bottom: none; }
   .sp-item:hover, .sp-item.active { background: var(--accent-bg); }
+  .sp-item.picked { background: #eaf6ec; }
+  .sp-item.picked.active { background: #dcefe0; }
   .sp-name { font-weight: 500; }
+  /* Número de orden: el set se monta en el orden en que vas marcando. */
+  .sp-order {
+    display: inline-block; min-width: 18px; height: 18px; line-height: 18px;
+    margin-right: 7px; text-align: center; border-radius: 9px;
+    background: #2f9e44; color: white; font-size: 11px; font-weight: 600;
+  }
+  .sp-order.empty { background: transparent; color: transparent; }
   .sp-genre {
     font-size: 11px;
     color: var(--accent);
@@ -325,9 +334,21 @@
     font-size: 11px;
     color: var(--muted);
     display: flex;
-    justify-content: space-between;
     align-items: center;
     gap: 8px;
+    flex-wrap: wrap;
+  }
+  .sp-foot .sp-grow { flex: 1; }
+  .sp-foot button { padding: 5px 11px; font-size: 12px; }
+  .sp-foot button.primary {
+    background: var(--accent); color: white; border-color: var(--accent);
+  }
+  .sp-foot button.primary:hover { background: #24578c; }
+  .sp-foot button:disabled { opacity: .45; cursor: default; }
+  .sp-foot button:disabled:hover { background: white; }
+  .sp-foot button.primary:disabled:hover { background: var(--accent); }
+  @media (max-width: 640px) {
+    .sp-foot .sp-help { display: none; }
   }
 
   @media (max-width: 640px) {
@@ -399,7 +420,10 @@
     </div>
     <div class="sp-list" id="spList"></div>
     <div class="sp-foot">
-      <span>↑↓ para moverte · Enter para añadir · Esc para cerrar</span>
+      <span class="sp-help">↑↓ moverte · Enter marcar · Esc cerrar</span>
+      <span class="sp-grow"></span>
+      <button id="spNewSheet" disabled>Nueva hoja</button>
+      <button id="spAdd" class="primary" disabled>Añadir</button>
       <button id="spClose">Cerrar</button>
     </div>
   </div>
@@ -985,12 +1009,16 @@
     if (songPick.classList.contains('open')) renderSongList();
   };
 
-  const songPick   = document.getElementById('songPick');
-  const spSearch   = document.getElementById('spSearch');
-  const spList     = document.getElementById('spList');
-  const spCount    = document.getElementById('spCount');
-  const spUpdated  = document.getElementById('spUpdated');
+  const songPick    = document.getElementById('songPick');
+  const spSearch    = document.getElementById('spSearch');
+  const spList      = document.getElementById('spList');
+  const spCount     = document.getElementById('spCount');
+  const spUpdated   = document.getElementById('spUpdated');
+  const spAddBtn    = document.getElementById('spAdd');
+  const spSheetBtn  = document.getElementById('spNewSheet');
   let spActive = 0;
+  // Ids marcados, en el orden en que se marcaron: así se monta el set.
+  let spPicked = [];
 
   const normText = s => (s || '').toLowerCase()
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -1048,7 +1076,9 @@
     columns.forEach((col, i) => {
       if (used.has(i)) return;
       if (/nota|observ|coment/.test(normText(col.name))) {
-        out[i] = song.notes || (hasGenreCol ? '' : (song.genre || ''));
+        // Una nota que solo repite el género no aporta nada en esta columna.
+        const note = (song.notes && song.notes !== song.genre) ? song.notes : '';
+        out[i] = note || (hasGenreCol ? '' : (song.genre || ''));
         used.add(i);
       }
     });
@@ -1088,11 +1118,39 @@
         s.lufs != null ? s.lufs + ' LUFS' : '',
       ].filter(Boolean).join(' · ');
       const genre = s.genre ? `<span class="sp-genre">${escapeHtml(s.genre)}</span>` : '';
-      return `<div class="sp-item${i === spActive ? ' active' : ''}" data-i="${i}">
-        <span><span class="sp-name">${escapeHtml(s.name)}</span>${genre}</span>
+      const pos = spPicked.indexOf(s.id);
+      const order = pos >= 0
+        ? `<span class="sp-order">${pos + 1}</span>`
+        : `<span class="sp-order empty">·</span>`;
+      return `<div class="sp-item${i === spActive ? ' active' : ''}${pos >= 0 ? ' picked' : ''}" data-i="${i}">
+        <span>${order}<span class="sp-name">${escapeHtml(s.name)}</span>${genre}</span>
         <span class="sp-stats">${stats}</span>
       </div>`;
     }).join('');
+
+    updatePickButtons();
+  }
+
+  function updatePickButtons() {
+    const n = spPicked.length;
+    spAddBtn.disabled = spSheetBtn.disabled = n === 0;
+    spAddBtn.textContent = n ? `Añadir ${n} tema${n > 1 ? 's' : ''}` : 'Añadir';
+    spSheetBtn.textContent = n ? `Nueva hoja con ${n}` : 'Nueva hoja';
+  }
+
+  function togglePick(song) {
+    if (!song) return;
+    const i = spPicked.indexOf(song.id);
+    if (i >= 0) spPicked.splice(i, 1);
+    else spPicked.push(song.id);
+    renderSongList();
+  }
+
+  // Los temas marcados, en el orden en que se marcaron.
+  function pickedSongs() {
+    return spPicked
+      .map(id => catalog.songs.find(s => s.id === id))
+      .filter(Boolean);
   }
 
   function escapeHtml(s) {
@@ -1103,6 +1161,7 @@
   function openSongPick() {
     spSearch.value = '';
     spActive = 0;
+    spPicked = [];
     songPick.classList.add('open');
     renderSongList();
     spSearch.focus();
@@ -1116,10 +1175,45 @@
     if (!song) return;
     const cells = mapSongToColumns(song, state.columns);
     tbody.appendChild(buildRow({ cells, color: '' }));
+  }
+
+  // Añade los marcados al final de la hoja que estás viendo.
+  function addPickedToSheet() {
+    const songs = pickedSongs();
+    if (!songs.length) return;
+    songs.forEach(insertSong);
     renumber();
     recalcTotal();
     scheduleSave();
-    flashStatus(`añadido: ${song.name}`);
+    flashStatus(`${songs.length} tema${songs.length > 1 ? 's' : ''} añadido${songs.length > 1 ? 's' : ''}`);
+    spPicked = [];
+    renderSongList();
+  }
+
+  // Crea una hoja nueva ya montada con los marcados.
+  function newSheetFromPicked() {
+    const songs = pickedSongs();
+    if (!songs.length) return;
+    const name = prompt('Nombre del nuevo set:', 'Set ' + (doc.sheets.length + 1));
+    if (name == null) return;
+
+    syncActiveFromDom();
+    const sheet = normalizeSheet({
+      id: uid(),
+      name: name.trim() || ('Set ' + (doc.sheets.length + 1)),
+      columns: state.columns.map(c => ({ ...c })),   // hereda las columnas de la hoja actual
+      rows: songs.map(s => ({ cells: mapSongToColumns(s, state.columns), color: '' })),
+    });
+    if (!sheet) return;
+
+    doc.sheets.push(sheet);
+    doc.activeId = sheet.id;
+    state = sheet;
+    spPicked = [];
+    closeSongPick();
+    render();
+    saveNow();
+    flashStatus(`set «${sheet.name}» con ${songs.length} temas`);
   }
 
   document.getElementById('addSong').addEventListener('click', openSongPick);
@@ -1144,19 +1238,24 @@
     if (e.key === 'Enter') {
       e.preventDefault();
       if (!rows.length) return;
-      insertSong(rows[spActive]);
-      // Se queda abierto: montar un set es añadir temas seguidos.
-      spSearch.select();
+      // Enter marca y limpia la búsqueda: buscar, Enter, buscar, Enter…
+      // y al final se empujan todos de una vez.
+      togglePick(rows[spActive]);
+      spSearch.value = '';
+      spActive = 0;
+      renderSongList();
     }
   });
 
   spList.addEventListener('click', (e) => {
     const item = e.target.closest('.sp-item');
     if (!item) return;
-    insertSong(songMatches()[Number(item.dataset.i)]);
+    togglePick(songMatches()[Number(item.dataset.i)]);
     spSearch.focus();
-    spSearch.select();
   });
+
+  spAddBtn.addEventListener('click', addPickedToSheet);
+  spSheetBtn.addEventListener('click', newSheetFromPicked);
 
   // ---------------- Toolbar: hojas (sets) ----------------
   sheetSelect.addEventListener('change', () => {
@@ -1171,7 +1270,17 @@
     const name = prompt('Nombre del nuevo set:', 'Set ' + (doc.sheets.length + 1));
     if (name == null) return;
     syncActiveFromDom();
-    const s = defaultSheet(name.trim() || ('Set ' + (doc.sheets.length + 1)));
+    // El set nuevo hereda las columnas del que estás viendo: si esta hoja
+    // tiene BPM, Género o LUFS, "+ Tema" puede rellenarlas desde el primer
+    // momento en vez de obligarte a recrearlas a mano.
+    const s = normalizeSheet({
+      id: uid(),
+      name: name.trim() || ('Set ' + (doc.sheets.length + 1)),
+      columns: state.columns.map(c => ({ ...c })),
+      rows: Array.from({ length: 8 }, () => ({
+        cells: state.columns.map(() => ''), color: '',
+      })),
+    }) || defaultSheet(name.trim());
     doc.sheets.push(s);
     doc.activeId = s.id;
     state = s;
