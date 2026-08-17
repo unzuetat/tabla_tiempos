@@ -112,7 +112,39 @@
     user-select: none;
     position: relative;
   }
-  th.data-col { padding-right: 26px; }
+  th.data-col { padding-right: 44px; }
+  /* Ordenar: aparece al pasar el ratón, salvo si está ordenando por ella. */
+  .col-sort {
+    position: absolute;
+    top: 4px;
+    right: 26px;
+    padding: 0 4px;
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--muted);
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    opacity: 0;
+    z-index: 3;
+  }
+  thead th:hover .col-sort { opacity: 1; }
+  .col-sort.active { opacity: 1; color: var(--accent); font-weight: 700; }
+  .col-sort:hover { color: var(--accent); background: transparent; }
+
+  /* Fila apartada del cómputo: visible, pero claramente fuera. */
+  tbody tr.row-off td.data-cell { opacity: 0.45; }
+  tbody tr.row-off td.time { text-decoration: line-through; }
+  td.actions button.off-btn { color: var(--muted); }
+  td.actions button.off-btn:hover { color: var(--accent); background: transparent; }
+  td.actions button.off-btn.is-off { color: var(--warn); opacity: 1; }
+  .total-fuera {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
   .col-name {
     display: block;
     outline: none;
@@ -399,6 +431,7 @@
   <label class="btn" for="importFile">Importar JSON</label>
   <input type="file" id="importFile" accept="application/json,.json">
   <button id="reset" class="danger">Reset hoja</button>
+  <button id="undoSort" style="display:none">Deshacer orden</button>
   <a class="btn" href="./biblioteca.html">Biblioteca de temas</a>
   <span class="saved-status" id="status"></span>
 </div>
@@ -550,6 +583,7 @@
       return {
         cells: cells.map(v => v == null ? '' : String(v)),
         color: typeof r.color === 'string' ? r.color : '',
+        off: !!r.off,
       };
     });
     return {
@@ -606,6 +640,7 @@
     const rows = [...tbody.querySelectorAll('tr')].map(tr => ({
       cells: [...tr.querySelectorAll('td.data-cell')].map(td => td.textContent),
       color: tr.dataset.color || '',
+      off: tr.dataset.off === 'true',
     }));
     return { columns, rows };
   }
@@ -668,6 +703,18 @@
     name.addEventListener('input', scheduleSave);
     el.appendChild(name);
 
+    const sortBtn = document.createElement('button');
+    sortBtn.className = 'col-sort';
+    const dir = sortState.col === idx ? sortState.dir : null;
+    if (dir) sortBtn.classList.add('active');
+    sortBtn.textContent = dir === 'asc' ? '↑' : dir === 'desc' ? '↓' : '↕';
+    sortBtn.title = col.time || /bpm|lufs/i.test(col.name)
+      ? 'Ordenar de menor a mayor / de mayor a menor'
+      : 'Ordenar alfabéticamente (A-Z / Z-A)';
+    sortBtn.addEventListener('mousedown', e => e.stopPropagation());
+    sortBtn.addEventListener('click', () => sortByColumn(idx));
+    el.appendChild(sortBtn);
+
     const delBtn = document.createElement('button');
     delBtn.className = 'col-del';
     delBtn.title = 'Eliminar columna';
@@ -689,6 +736,9 @@
     const tr = document.createElement('tr');
     tr.draggable = false;
     applyRowColor(tr, rowState.color || '');
+    // Fila apartada: sigue ahí, con sus datos, pero no suma en el total.
+    // Sirve para probar "¿y si quito este y meto aquel?".
+    if (rowState.off) { tr.dataset.off = 'true'; tr.classList.add('row-off'); }
 
     const handleTd = document.createElement('td');
     handleTd.className = 'handle';
@@ -721,6 +771,14 @@
       colorBtn.style.color = rowState.color;
     }
     actionsTd.appendChild(colorBtn);
+
+    const offBtn = document.createElement('button');
+    offBtn.className = 'off-btn' + (rowState.off ? ' is-off' : '');
+    offBtn.title = rowState.off
+      ? 'Volver a contar en el total'
+      : 'No contar en el total (sin borrar la fila)';
+    offBtn.textContent = rowState.off ? '⊘' : '⊙';
+    actionsTd.appendChild(offBtn);
 
     const del = document.createElement('button');
     del.className = 'del';
@@ -765,10 +823,26 @@
       totalCell.id = 'total';
       footRow.appendChild(totalCell);
       for (let i = timeIdx + 1; i < state.columns.length; i++) {
-        footRow.appendChild(td('', ''));
+        const cell = td('', '');
+        // El tiempo apartado va en la celda de al lado del total, si la hay.
+        if (i === timeIdx + 1) {
+          const span = document.createElement('span');
+          span.id = 'totalFuera';
+          span.className = 'total-fuera';
+          cell.appendChild(span);
+        }
+        footRow.appendChild(cell);
       }
     }
-    footRow.appendChild(td('', '')); // actions col
+    const actionsCell = td('', '');
+    // Sin columna a la derecha del tiempo, lo apartado se muestra al final.
+    if (!document.getElementById('totalFuera')) {
+      const span = document.createElement('span');
+      span.id = 'totalFuera';
+      span.className = 'total-fuera';
+      actionsCell.appendChild(span);
+    }
+    footRow.appendChild(actionsCell);
   }
 
   function td(cls, text) {
@@ -810,6 +884,21 @@
     colorBtn.addEventListener('click', e => {
       e.stopPropagation();
       openColorPop(colorBtn, tr);
+    });
+
+    tr.querySelector('button.off-btn').addEventListener('click', e => {
+      e.stopPropagation();
+      const off = tr.dataset.off !== 'true';
+      tr.dataset.off = off ? 'true' : '';
+      tr.classList.toggle('row-off', off);
+      const btn = e.currentTarget;
+      btn.classList.toggle('is-off', off);
+      btn.textContent = off ? '⊘' : '⊙';
+      btn.title = off
+        ? 'Volver a contar en el total'
+        : 'No contar en el total (sin borrar la fila)';
+      recalcTotal();
+      scheduleSave();
     });
 
     tr.querySelectorAll('td.data-cell').forEach(td => {
@@ -961,13 +1050,90 @@
   function recalcTotal() {
     const totalEl = document.getElementById('total');
     if (!totalEl) return;
-    let total = 0;
-    tbody.querySelectorAll('td[data-time="true"]').forEach(td => {
-      const v = parseTime(td.textContent);
-      if (v !== null) total += v;
+    let total = 0, fuera = 0;
+    tbody.querySelectorAll('tr').forEach(tr => {
+      const apartada = tr.dataset.off === 'true';
+      tr.querySelectorAll('td[data-time="true"]').forEach(td => {
+        const v = parseTime(td.textContent);
+        if (v === null) return;
+        if (apartada) fuera += v; else total += v;
+      });
     });
     totalEl.textContent = formatTime(total);
+    // Lo apartado se enseña aparte: es la referencia de "cuánto ganarías si
+    // lo volvieras a meter".
+    const fueraEl = document.getElementById('totalFuera');
+    if (fueraEl) {
+      fueraEl.textContent = fuera ? `−${formatTime(fuera)} fuera` : '';
+    }
   }
+
+  // ---------------- Ordenar por columna ----------------
+  // Un set tiene un orden pensado, así que ordenar es una ayuda para revisar,
+  // no algo definitivo: se guarda el orden anterior para poder volver.
+  const sortState = { col: null, dir: null, prevRows: null };
+
+  function sortByColumn(idx) {
+    syncActiveFromDom();
+    const col = state.columns[idx];
+    const dir = (sortState.col === idx && sortState.dir === 'asc') ? 'desc' : 'asc';
+
+    // Guarda el orden de antes solo la primera vez que se ordena, para que
+    // "volver al orden anterior" devuelva al orden manual y no a otro ordenado.
+    if (sortState.col === null) sortState.prevRows = state.rows.map(r => ({ ...r }));
+
+    const valorDe = (row) => (row.cells[idx] || '').trim();
+    const esNumerica = col.time || state.rows.every(r => {
+      const v = valorDe(r);
+      return v === '' || /^-?\d+([.,]\d+)?$/.test(v) || (col.time && parseTime(v) !== null);
+    });
+
+    const clave = (row) => {
+      const v = valorDe(row);
+      if (v === '') return null;                       // las vacías, al final
+      if (col.time) return parseTime(v);
+      if (esNumerica) return parseFloat(v.replace(',', '.'));
+      return v;
+    };
+
+    const mult = dir === 'asc' ? 1 : -1;
+    state.rows.sort((a, b) => {
+      const ka = clave(a), kb = clave(b);
+      if (ka === null && kb === null) return 0;
+      if (ka === null) return 1;                       // vacías siempre abajo
+      if (kb === null) return -1;
+      if (typeof ka === 'string') {
+        return mult * ka.localeCompare(kb, 'es', { sensitivity: 'base', numeric: true });
+      }
+      return mult * (ka - kb);
+    });
+
+    sortState.col = idx;
+    sortState.dir = dir;
+    render();
+    saveNow();
+    mostrarDeshacerOrden(col.name || 'la columna', dir);
+  }
+
+  function mostrarDeshacerOrden(nombreCol, dir) {
+    const btn = document.getElementById('undoSort');
+    if (!btn) return;
+    btn.style.display = '';
+    btn.textContent = `Deshacer orden (${nombreCol} ${dir === 'asc' ? '↑' : '↓'})`;
+  }
+
+  document.getElementById('undoSort').addEventListener('click', () => {
+    if (!sortState.prevRows) return;
+    syncActiveFromDom();
+    state.rows = sortState.prevRows.map(r => ({ ...r }));
+    sortState.col = null;
+    sortState.dir = null;
+    sortState.prevRows = null;
+    document.getElementById('undoSort').style.display = 'none';
+    render();
+    saveNow();
+    flashStatus('orden anterior restaurado');
+  });
 
   // ---------------- Toolbar: filas / columnas ----------------
   document.getElementById('addRow').addEventListener('click', () => {
