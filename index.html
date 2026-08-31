@@ -424,6 +424,7 @@
 
 <div class="toolbar">
   <button id="addSong">+ Tema</button>
+  <button id="fillFromCatalog" title="Rellena LUFS, BPM y género de los temas de esta hoja que estén en el catálogo">Completar datos</button>
   <button id="addRow">+ Fila</button>
   <button id="addCol">+ Columna</button>
   <button id="exportCsv">Exportar CSV</button>
@@ -1207,55 +1208,84 @@
   // Reparte los datos de un tema entre las columnas de la hoja: la de tiempo
   // recibe la duración, las que se llamen BPM/LUFS/Género/Tono lo suyo, y el
   // nombre cae en la primera columna libre que no sea de tiempo.
+  // Qué dato del catálogo le toca a cada columna, según cómo se llame.
+  const TIPOS_COL = [
+    [/bpm|tempo/,               'bpm'],
+    [/lufs/,                    'lufs'],
+    [/genero|genre|estilo/,     'genre'],
+    [/tonalidad|tono|^key$/,    'key'],
+    [/energ/,                   'energy'],
+    [/duracion|duration|largo/, 'dur'],
+    [/nota|observ|coment/,      'notes'],
+  ];
+
+  // Columnas que se crean solas cuando hacen falta para un dato que el
+  // catálogo trae y la hoja no tiene dónde poner.
+  const COL_POR_DEFECTO = {
+    dur:   { name: 'Tiempo', width: 90,  time: true  },
+    bpm:   { name: 'BPM',    width: 70,  time: false },
+    lufs:  { name: 'LUFS',   width: 70,  time: false },
+    genre: { name: 'Género', width: 110, time: false },
+  };
+
+  function tipoColumna(col) {
+    if (col.time) return 'dur';
+    const n = normText(col.name);
+    for (const [re, tipo] of TIPOS_COL) if (re.test(n)) return tipo;
+    return null;
+  }
+
+  function valorDelTema(song, tipo, hayColGenero) {
+    switch (tipo) {
+      case 'dur':    return song.dur ? formatTime(song.dur) : '';
+      case 'bpm':    return song.bpm ? String(song.bpm) : '';
+      case 'lufs':   return song.lufs != null ? String(song.lufs) : '';
+      case 'genre':  return song.genre || '';
+      case 'key':    return song.key || '';
+      case 'energy': return song.energy ? String(song.energy) : '';
+      case 'notes': {
+        // Una nota que solo repite el género no aporta nada en esta columna.
+        const nota = (song.notes && song.notes !== song.genre) ? song.notes : '';
+        return nota || (hayColGenero ? '' : (song.genre || ''));
+      }
+      default: return '';
+    }
+  }
+
+  // La columna del nombre: la primera que no sea de tiempo ni de ningún dato
+  // conocido. En la hoja de siempre es "Tarea".
+  function indiceNombre(columns) {
+    let idx = columns.findIndex(c => !c.time && tipoColumna(c) === null);
+    if (idx === -1) idx = columns.findIndex(c => !c.time);
+    return idx === -1 ? 0 : idx;
+  }
+
+  // Crea las columnas que falten para los datos que traen estos temas. Sin
+  // esto, el LUFS de un tema no se ve por ningún lado si la hoja no tenía
+  // una columna llamada LUFS.
+  function asegurarColumnas(songs) {
+    const creadas = [];
+    ['dur', 'bpm', 'genre', 'lufs'].forEach(tipo => {
+      if (state.columns.some(c => tipoColumna(c) === tipo)) return;
+      if (!songs.some(s => valorDelTema(s, tipo, true) !== '')) return;
+      state.columns.push({ ...COL_POR_DEFECTO[tipo] });
+      state.rows.forEach(r => r.cells.push(''));
+      creadas.push(COL_POR_DEFECTO[tipo].name);
+    });
+    return creadas;
+  }
+
   function mapSongToColumns(song, columns) {
     const out = columns.map(() => '');
-    const used = new Set();
-    let hasGenreCol = false;
+    const hayColGenero = columns.some(c => tipoColumna(c) === 'genre');
+    const nameIdx = indiceNombre(columns);
 
     columns.forEach((col, i) => {
-      const n = normText(col.name);
-      if (col.time) {
-        if (song.dur) out[i] = formatTime(song.dur);
-        used.add(i);
-      } else if (/bpm|tempo/.test(n)) {
-        if (song.bpm) out[i] = String(song.bpm);
-        used.add(i);
-      } else if (/lufs/.test(n)) {
-        if (song.lufs != null) out[i] = String(song.lufs);
-        used.add(i);
-      } else if (/genero|genre|estilo/.test(n)) {
-        out[i] = song.genre || '';
-        used.add(i);
-        hasGenreCol = true;
-      } else if (/tonalidad|tono|^key$/.test(n)) {
-        out[i] = song.key || '';
-        used.add(i);
-      } else if (/energ/.test(n)) {
-        if (song.energy) out[i] = String(song.energy);
-        used.add(i);
-      } else if (/duracion|duration|largo/.test(n)) {
-        if (song.dur) out[i] = formatTime(song.dur);
-        used.add(i);
-      }
+      if (i === nameIdx) return;
+      const tipo = tipoColumna(col);
+      if (tipo) out[i] = valorDelTema(song, tipo, hayColGenero);
     });
-
-    let nameIdx = columns.findIndex((c, i) => !c.time && !used.has(i));
-    if (nameIdx === -1) nameIdx = columns.findIndex(c => !c.time);
-    if (nameIdx === -1) nameIdx = 0;
     out[nameIdx] = song.name;
-    used.add(nameIdx);
-
-    // Sin columna de género, el género acaba en Notas: así es como estaba la
-    // tabla hasta ahora ("Psytrance", "Acid 1"…).
-    columns.forEach((col, i) => {
-      if (used.has(i)) return;
-      if (/nota|observ|coment/.test(normText(col.name))) {
-        // Una nota que solo repite el género no aporta nada en esta columna.
-        const note = (song.notes && song.notes !== song.genre) ? song.notes : '';
-        out[i] = note || (hasGenreCol ? '' : (song.genre || ''));
-        used.add(i);
-      }
-    });
 
     return out;
   }
@@ -1366,11 +1396,20 @@
   function addPickedToSheet() {
     const songs = pickedSongs();
     if (!songs.length) return;
-    songs.forEach(insertSong);
-    renumber();
-    recalcTotal();
-    scheduleSave();
-    flashStatus(`${songs.length} tema${songs.length > 1 ? 's' : ''} añadido${songs.length > 1 ? 's' : ''}`);
+
+    // Si los temas traen datos que la hoja no sabe dónde poner (LUFS, BPM,
+    // género), se crean esas columnas antes de insertar.
+    syncActiveFromDom();
+    const creadas = asegurarColumnas(songs);
+    songs.forEach(s => state.rows.push({
+      cells: mapSongToColumns(s, state.columns), color: '', off: false,
+    }));
+    render();
+    saveNow();
+
+    const n = songs.length;
+    flashStatus(`${n} tema${n > 1 ? 's' : ''} añadido${n > 1 ? 's' : ''}` +
+      (creadas.length ? ` · nueva${creadas.length > 1 ? 's' : ''} columna${creadas.length > 1 ? 's' : ''}: ${creadas.join(', ')}` : ''));
     spPicked = [];
     renderSongList();
   }
@@ -1383,11 +1422,19 @@
     if (name == null) return;
 
     syncActiveFromDom();
+    // Se calculan sobre la hoja actual las columnas que los temas necesitan,
+    // y el set nuevo nace ya con ellas.
+    const columnasPrevias = state.columns.map(c => ({ ...c }));
+    asegurarColumnas(songs);
+    const columnas = state.columns.map(c => ({ ...c }));
+    state.columns = columnasPrevias;                 // la hoja de origen no se toca
+    state.rows.forEach(r => { r.cells.length = columnasPrevias.length; });
+
     const sheet = normalizeSheet({
       id: uid(),
       name: name.trim() || ('Set ' + (doc.sheets.length + 1)),
-      columns: state.columns.map(c => ({ ...c })),   // hereda las columnas de la hoja actual
-      rows: songs.map(s => ({ cells: mapSongToColumns(s, state.columns), color: '' })),
+      columns: columnas,
+      rows: songs.map(s => ({ cells: mapSongToColumns(s, columnas), color: '', off: false })),
     });
     if (!sheet) return;
 
@@ -1441,6 +1488,56 @@
 
   spAddBtn.addEventListener('click', addPickedToSheet);
   spSheetBtn.addEventListener('click', newSheetFromPicked);
+
+  // Rellena los datos de las filas ya escritas cruzándolas con el catálogo
+  // por el nombre del tema. No pisa nada de lo que haya escrito: solo entra
+  // en las celdas vacías.
+  function completarDesdeCatalogo() {
+    if (!catalog.songs.length) {
+      flashStatus('no hay catálogo publicado', true);
+      return;
+    }
+    syncActiveFromDom();
+    const porNombre = new Map(catalog.songs.map(s => [normText(s.name), s]));
+    const nameIdx = indiceNombre(state.columns);
+
+    const encontrados = state.rows
+      .map(r => porNombre.get(normText((r.cells[nameIdx] || '').trim())))
+      .filter(Boolean);
+    if (!encontrados.length) {
+      flashStatus('ningún tema de esta hoja está en el catálogo', true);
+      return;
+    }
+
+    const creadas = asegurarColumnas(encontrados);
+    const hayColGenero = state.columns.some(c => tipoColumna(c) === 'genre');
+    let filas = 0, celdas = 0;
+
+    state.rows.forEach(row => {
+      const song = porNombre.get(normText((row.cells[nameIdx] || '').trim()));
+      if (!song) return;
+      let tocada = false;
+      state.columns.forEach((col, i) => {
+        const tipo = tipoColumna(col);
+        if (!tipo || (row.cells[i] || '').trim() !== '') return;   // no pisa lo escrito
+        const v = valorDelTema(song, tipo, hayColGenero);
+        if (v) { row.cells[i] = v; celdas++; tocada = true; }
+      });
+      if (tocada) filas++;
+    });
+
+    render();
+    saveNow();
+    flashStatus(
+      celdas
+        ? `${filas} tema${filas > 1 ? 's' : ''} completado${filas > 1 ? 's' : ''}` +
+          (creadas.length ? ` · nuevas columnas: ${creadas.join(', ')}` : '')
+        : 'ya estaba todo completo'
+    );
+  }
+
+  document.getElementById('fillFromCatalog')
+    .addEventListener('click', completarDesdeCatalogo);
 
   // ---------------- Toolbar: hojas (sets) ----------------
   sheetSelect.addEventListener('change', () => {
